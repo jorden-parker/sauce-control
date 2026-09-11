@@ -21,7 +21,9 @@ test("reviewer runs the saved Comparison and gets a Proxy link to each Instance,
   await page.getByRole("button", { name: "Run Comparison" }).click();
 
   const status = page.getByTestId("comparison-status");
-  await expect(status).toContainText("Both Instances of web-app are up.");
+  await expect(status).toContainText("Both Instances of web-app are up.", {
+    timeout: 30_000,
+  });
   const links = status.getByRole("link", {
     name: /^http:\/\/127\.0\.0\.1:\d+\/$/u,
   });
@@ -37,6 +39,9 @@ test("reviewer runs the saved Comparison and gets a Proxy link to each Instance,
     "/about",
     "/panel",
   ]);
+  await expect(page.getByTestId("detection-banner")).toContainText(
+    "Affected Page detection is off"
+  );
 
   await page.getByRole("button", { name: "Stop Comparison" }).click();
   await expect(

@@ -8,7 +8,11 @@ import { loadEnvironment } from "@/repository-config/environment";
 import { dataDirectory } from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
 import { gitHubRequestLog } from "@/github/request-log";
-import { nodeCommandRunner } from "@/shell/command-runner";
+import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
+import {
+  type AffectedPages,
+  detectAffectedPages,
+} from "./detect-affected-pages";
 import { type Discovery, discoverPages } from "./discover-pages";
 import { type RunningComparison, runComparison } from "./run-comparison";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
@@ -21,6 +25,7 @@ export type ComparisonStatus =
   | { kind: "starting"; repository: string; stage: ComparisonStage }
   | { kind: "failed"; message: string }
   | {
+      affected: AffectedPages;
       discovery: Discovery;
       kind: "running";
       repository: string;
@@ -28,10 +33,12 @@ export type ComparisonStatus =
     };
 
 /** What the runner is busy with before a Comparison is up. */
-export type ComparisonStage = "instances" | "discovery";
+export type ComparisonStage = "instances" | "discovery" | "affected";
 
 const READINESS = { pollIntervalMs: 1000, timeoutMs: 10 * 60 * 1000 },
-  useStub = (): boolean => process.env.SAUCE_CONTROL_COMPARISON === "stub";
+  useStub = (): boolean => process.env.SAUCE_CONTROL_COMPARISON === "stub",
+  /** The stub has no clones to diff, so nothing changed and detection falls back to every Page. */
+  stubGit: CommandRunner = { run: () => Promise.resolve({ stdout: "" }) };
 
 let status: ComparisonStatus = { kind: "idle" },
   running: RunningComparison | undefined,
@@ -126,6 +133,17 @@ export const startCurrentComparison = async (): Promise<void> => {
           "config" in request ? request.config : request.discovery
         );
         status = {
+          kind: "starting",
+          repository: request.repository,
+          stage: "affected",
+        };
+        const affected = await detectAffectedPages(
+          "config" in request ? nodeCommandRunner : stubGit,
+          comparison,
+          discovery
+        );
+        status = {
+          affected,
           discovery,
           kind: "running",
           repository: request.repository,
