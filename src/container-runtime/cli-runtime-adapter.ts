@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { RuntimeAdapter } from "./runtime-adapter";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
+import { startCommand } from "./start-command";
+import { MANUAL_START_HINT } from "./start-runtime";
 
 const run = promisify(execFile),
   VERSION_PATTERN = /\d+\.\d+\.\d+/u,
@@ -30,14 +32,14 @@ const run = promisify(execFile),
       return false;
     }
   },
-  startCommand = (name: RuntimeName): [string, string[]] => {
-    if (name === "podman") {
-      return ["podman", ["machine", "start"]];
+  /** Active docker context, e.g. `colima` or `desktop-linux`; empty when unknown. */
+  dockerContext = async (): Promise<string> => {
+    try {
+      const { stdout } = await run("docker", ["context", "show"]);
+      return stdout.trim();
+    } catch {
+      return "";
     }
-    if (process.platform === "darwin") {
-      return ["open", ["-a", "Docker"]];
-    }
-    return ["systemctl", ["start", "docker"]];
   };
 
 /** Real Container Runtime adapter: shells out to `docker` / `podman` only. */
@@ -50,7 +52,17 @@ export const cliRuntimeAdapter: RuntimeAdapter = {
     return { installed: true, name, running: await isRunning(name), version };
   },
   start: async (name) => {
-    const [command, args] = startCommand(name);
-    await run(command, args);
+    const [command, args] = startCommand(name, {
+      dockerContext: await dockerContext(),
+      platform: process.platform,
+    });
+    try {
+      await run(command, args);
+    } catch (error) {
+      throw new Error(
+        `Could not start ${name} with \`${[command, ...args].join(" ")}\`. ${MANUAL_START_HINT[name]} and try again.`,
+        { cause: error }
+      );
+    }
   },
 };

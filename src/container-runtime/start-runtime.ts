@@ -9,7 +9,7 @@ export interface StartOptions {
 
 /** How a reviewer starts each runtime by hand, for error messages. */
 export const MANUAL_START_HINT: Record<RuntimeName, string> = {
-  docker: "Open Docker Desktop",
+  docker: "Start Docker (Docker Desktop, or `colima start`)",
   podman: "Run `podman machine start`",
 };
 
