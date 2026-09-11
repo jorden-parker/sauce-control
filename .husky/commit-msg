@@ -1,3 +1,1 @@
-# Strip AI attribution trailers before linting the message.
-sed -i '' -E '/^(Claude-Session:|Co-Authored-By: Claude|Generated with \[?Claude Code)/d; /claude\.ai\/code\//d' "$1"
 pnpm exec commitlint --edit "$1"
