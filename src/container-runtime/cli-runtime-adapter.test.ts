@@ -90,15 +90,45 @@ describe("CLI adapter start", () => {
     );
   });
 
-  it("names the failed command and the manual hint", async () => {
+  it("names the failed command, the manual hint, and the reason", async () => {
     const shell = fakeShell({
       outputs: { "docker context show": "desktop-linux\n" },
     });
     await expect(
       createCliRuntimeAdapter(shell, mac).start("docker")
     ).rejects.toThrow(
-      "Could not start docker with `open -a Docker`. Open Docker and try again."
+      "Could not start docker with `open -a Docker`. Open Docker and try again. (open: not found)"
     );
+  });
+
+  it("gives the start command its own, longer timeout than ordinary CLI calls", async () => {
+    const shell = fakeShell({
+      hang: ["podman machine start"],
+      outputs: {},
+    });
+    await expect(
+      createCliRuntimeAdapter(shell, {
+        ...mac,
+        commandTimeoutMs: 5,
+        startTimeoutMs: 40,
+      }).start("podman")
+    ).rejects.toThrow(
+      "Could not start podman with `podman machine start`. Run `podman machine start` and try again. (timed out after 40ms)"
+    );
+  });
+
+  it("surfaces the last stderr line as the reason", async () => {
+    const shell: CommandRunner = {
+      run: () =>
+        Promise.reject(
+          Object.assign(new Error("Command failed"), {
+            stderr: "Error: podman machine init must be run first\n",
+          })
+        ),
+    };
+    await expect(
+      createCliRuntimeAdapter(shell, mac).start("podman")
+    ).rejects.toThrow("(Error: podman machine init must be run first)");
   });
 });
 

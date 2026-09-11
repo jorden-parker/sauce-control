@@ -9,9 +9,12 @@ export interface CliAdapterOptions {
   /** Upper bound per CLI call so a wedged daemon cannot hang the page. */
   commandTimeoutMs?: number;
   platform: NodeJS.Platform;
+  /** Upper bound for the start command; booting a VM (`podman machine start`) takes well over the per-call default. */
+  startTimeoutMs?: number;
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
+  DEFAULT_START_TIMEOUT_MS = 120_000,
   BUILD_TIMEOUT_MS = 30 * 60 * 1000,
   /** Resource caps for one Instance. */
   HARDENING = [
@@ -31,6 +34,19 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
   HEX_PORT = (port: number): string =>
     port.toString(16).toUpperCase().padStart(4, "0"),
   VERSION_PATTERN = /\d+\.\d+\.\d+/u,
+  /** Shortest useful line from a failed command: stderr when present, else the error message. */
+  failureReason = (error: unknown): string => {
+    if (typeof error === "object" && error !== null) {
+      const stderr = "stderr" in error ? String(error.stderr).trim() : "";
+      if (stderr !== "") {
+        return stderr.split("\n").at(-1) ?? stderr;
+      }
+      if (error instanceof Error) {
+        return error.message;
+      }
+    }
+    return String(error);
+  },
   isMissingBinary = (error: unknown): boolean =>
     typeof error === "object" &&
     error !== null &&
@@ -39,7 +55,11 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
 
 export const createCliRuntimeAdapter = (
   shell: CommandRunner,
-  { commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS, platform }: CliAdapterOptions
+  {
+    commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+    platform,
+    startTimeoutMs = DEFAULT_START_TIMEOUT_MS,
+  }: CliAdapterOptions
 ): RuntimeAdapter => {
   const run = (command: string, args: string[]) =>
       shell.run(command, args, { timeoutMs: commandTimeoutMs }),
@@ -159,7 +179,7 @@ export const createCliRuntimeAdapter = (
         published = await run(name, ["port", containerId, `${port}/tcp`]),
         hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
       if (Number.isNaN(hostPort)) {
-        throw new Error(
+        throw new TypeError(
           `Could not find the host port for container ${containerId}: ${published.stdout.trim()}`
         );
       }
@@ -177,10 +197,10 @@ export const createCliRuntimeAdapter = (
       }
       const [executable, args] = command;
       try {
-        await run(executable, args);
+        await shell.run(executable, args, { timeoutMs: startTimeoutMs });
       } catch (error) {
         throw new Error(
-          `Could not start ${name} with \`${[executable, ...args].join(" ")}\`. ${hint} and try again.`,
+          `Could not start ${name} with \`${[executable, ...args].join(" ")}\`. ${hint} and try again. (${failureReason(error)})`,
           { cause: error }
         );
       }
