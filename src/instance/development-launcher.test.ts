@@ -11,7 +11,8 @@ import { DEVELOPMENT_LAUNCHER } from "./development-launcher";
 // And working directory are replaced, so the diagnostic loop needs no VM.
 async function installationResult(
   script: string,
-  environment: Record<string, string>
+  environment: Record<string, string>,
+  setupEnvironment?: Record<string, string>
 ) {
   const root = mkdtempSync(join(tmpdir(), "launcher-diagnostic-"));
   writeFileSync(join(root, "install.cjs"), script);
@@ -28,7 +29,7 @@ async function installationResult(
       process: Object.assign(new EventEmitter(), { exit: () => {} }),
       require: (name: string) => {
         if (name === "node:fs") {
-          return { unlinkSync: () => {}, chmodSync: () => {} };
+          return { chmodSync: () => {}, unlinkSync: () => {} };
         }
         if (name === "node:net") {
           return {
@@ -37,7 +38,7 @@ async function installationResult(
               accept: (value: typeof socket) => void
             ) => {
               accept(socket);
-              return { listen: () => {}, close: () => {} };
+              return { close: () => {}, listen: () => {} };
             },
           };
         }
@@ -59,6 +60,7 @@ async function installationResult(
       JSON.stringify({
         environment,
         installCommand: `${JSON.stringify(process.execPath)} install.cjs`,
+        setupEnvironment,
       })
     );
     socket.emit("end");
@@ -69,6 +71,23 @@ async function installationResult(
 }
 
 describe("installer failure feedback", () => {
+  it("gives installation setup exports but excludes file-only app values and preserves container settings", async () => {
+    expect(
+      await installationResult(
+        `const valid = process.env.SETUP_CREDENTIAL==='setup-value' && process.env.FILE_ONLY===undefined && process.env.NODE_AUTH_TOKEN==='token' && process.env.HOME==='/home/node' && process.env.NODE_ENV==='development'; process.exitCode=valid?42:99;`,
+        {
+          FILE_ONLY: "private-runtime",
+          NODE_AUTH_TOKEN: "token",
+          SETUP_CREDENTIAL: "setup-value",
+        },
+        {
+          HOME: "/host",
+          NODE_ENV: "production",
+          SETUP_CREDENTIAL: "setup-value",
+        }
+      )
+    ).toBe("installation-failed:unknown:present:42");
+  });
   it("keeps a specific cause when a lifecycle wrapper also reports failure", async () => {
     expect(
       await installationResult(

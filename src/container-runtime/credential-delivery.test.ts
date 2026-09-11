@@ -261,6 +261,7 @@ describe.each(["docker", "podman"] as const)(
           API_TOKEN: "multi\nline",
           DOCKER_HOST: "do-not-use-on-host",
           NODE_AUTH_TOKEN: "install-secret",
+          SETUP_CREDENTIAL: "setup-secret",
         };
       await adapter.runContainer(runtime, {
         development: { installCommand: "npm ci", startCommand: "npm run dev" },
@@ -268,6 +269,10 @@ describe.each(["docker", "podman"] as const)(
         image: "test",
         labels: {},
         port: 3000,
+        setupEnvironment: {
+          NODE_AUTH_TOKEN: "install-secret",
+          SETUP_CREDENTIAL: "setup-secret",
+        },
       });
       environment.API_TOKEN = "changed";
       await adapter.stopContainers(runtime, ["id"]);
@@ -277,16 +282,22 @@ describe.each(["docker", "podman"] as const)(
         .map((call) => JSON.parse(call.options.input!))
         .filter((payload) => !payload.probe);
       expect(payloads[0].environment.NODE_AUTH_TOKEN).toBe("install-secret");
+      expect(payloads[0].setupEnvironment).toEqual({
+        NODE_AUTH_TOKEN: "install-secret",
+        SETUP_CREDENTIAL: "setup-secret",
+      });
+      expect(payloads[1].setupEnvironment).toBeUndefined();
       expect(payloads[1].environment).toEqual({
         API_TOKEN: "multi\nline",
         DOCKER_HOST: "do-not-use-on-host",
+        SETUP_CREDENTIAL: "setup-secret",
       });
       expect(payloads[1].installCommand).toBe("");
       expect(
         calls.every((call) => call.options.environment === undefined)
       ).toBe(true);
       expect(JSON.stringify(calls.map((call) => call.args))).not.toMatch(
-        /install-secret|multi|do-not-use-on-host/u
+        /install-secret|setup-secret|multi|do-not-use-on-host/u
       );
       await adapter.removeContainers(runtime, ["id"]);
       await expect(adapter.startContainers(runtime, ["id"])).rejects.toThrow(

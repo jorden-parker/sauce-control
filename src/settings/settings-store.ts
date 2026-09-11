@@ -23,6 +23,8 @@ export const DEFAULT_MANUAL_PAGES: ManualPages = { added: [], removed: [] };
 
 /** Dependency installation and development-server configuration for a Repository. */
 export interface RepositoryConfig {
+  /** Optional host command that prepares exported variables before a Comparison. */
+  environmentSetupCommand?: string;
   installCommand: string;
   crawl: CrawlLimits;
   /** Pages the reviewer added or removed by hand, on top of what discovery finds. */

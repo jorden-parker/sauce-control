@@ -44,7 +44,7 @@ export const StartupProgressPanel = ({
         <div key={scope}>
           <h3 className="mb-1 font-medium">
             {scope === "comparison"
-              ? "Page analysis"
+              ? "Comparison preparation and analysis"
               : `${scope === "base" ? "Base" : "Target"}: ${progress.branches[scope]}`}
           </h3>
           <ol className="flex flex-col gap-1">

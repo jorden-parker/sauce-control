@@ -35,6 +35,10 @@ import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { runStubComparison } from "./stub-comparison";
 import { isScenarioName } from "@/scenarios/scenario-name";
+import {
+  EnvironmentSetupError,
+  runEnvironmentSetup,
+} from "@/repository-config/environment-setup";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
@@ -112,6 +116,7 @@ const setStatus = (status: ComparisonStatus) => {
   },
   safeFailure = (error: unknown): string =>
     error instanceof EnvironmentFileError ||
+    error instanceof EnvironmentSetupError ||
     error instanceof ComparisonStartError
       ? error.message
       : "Could not start the Comparison. Open Compare → Configure repository to check the installation command, development server command and Port; check Environment Files on Compare and Container Runtime in Settings. Raw logs are suppressed to protect credentials.",
@@ -227,8 +232,8 @@ export const startCurrentComparison = async (
     repository: selection?.repository ?? "",
     stage: "instances",
   });
-  const { signal } = attempt.controller;
-  const fail = (error: unknown, scope?: ProgressScope) => {
+  const { signal } = attempt.controller,
+    fail = (error: unknown, scope?: ProgressScope) => {
       if (
         state.attempt !== attempt ||
         signal.aborted ||
@@ -292,7 +297,10 @@ export const startCurrentComparison = async (
     ) {
       throw new Error("Choose a valid Scenario.");
     }
-    const request = await gather();
+    const request = await gather(),
+      setupCommand = settings().getRepositoryConfig(
+        request.repository
+      )?.environmentSetupCommand;
     attempt.runtime = "config" in request ? request.runtime : undefined;
     signal.throwIfAborted();
     attempt.workDirectory = join(
@@ -303,6 +311,25 @@ export const startCurrentComparison = async (
     mkdirSync(attempt.workDirectory, { recursive: true });
     const work = async () => {
       try {
+        let setupEnvironment: Record<string, string> | undefined;
+        if (setupCommand?.trim()) {
+          attempt.progress.beginEnvironmentSetup();
+          setupEnvironment = await runEnvironmentSetup(setupCommand, {
+            signal,
+          });
+          signal.throwIfAborted();
+          if ("config" in request) {
+            request.environment = {
+              ...request.environment,
+              ...setupEnvironment,
+            };
+            validateInstanceEnvironment(
+              request.environment,
+              request.config.port
+            );
+          }
+          attempt.progress.completeEnvironmentSetup();
+        }
         const comparison =
           "config" in request
             ? await runComparison(
@@ -318,6 +345,7 @@ export const startCurrentComparison = async (
                   onProgress: (role, step) => {
                     if (!signal.aborted) attempt.progress.begin(role, step);
                   },
+                  setupEnvironment,
                   signal,
                   workDirectory: attempt.workDirectory!,
                 }

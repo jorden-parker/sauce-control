@@ -4,6 +4,8 @@ status: accepted
 
 # Deliver Comparison credentials through stdin
 
+Extended by [ADR 0007](./0007-prepare-comparison-environment-on-host.md): exports from an explicit host Environment Setup Command may also reach dependency installation. The original file/keychain stage split and installation-only `NODE_AUTH_TOKEN` remain in effect; Environment Files still never execute as shell code.
+
 Sauce Control sends a structured credential payload through stdin to a trusted launcher inside each Instance's container. The launcher gives dependency installation only `NODE_AUTH_TOKEN` from the merged Repository variables, and gives the development server the remaining values. Values must not appear in command arguments, container inspection configuration, images, saved settings or a separate secret store; files are parsed as data and never sourced as shell code.
 
 This retains ADR 0001's shared Docker/Podman CLI approach while replacing ordinary environment flags for credential delivery. Native secret mechanisms have differing availability and storage behavior, and environment configuration fails the agreed inspection requirement. The launcher approach avoids that extra secret-store lifecycle, at the cost of owning launch, output handling and restart coordination.

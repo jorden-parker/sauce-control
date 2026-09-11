@@ -40,6 +40,7 @@ export const saveRepositoryConfig = async (
       pageLimit: integer(field("pageLimit"), DEFAULT_CRAWL_LIMITS.pageLimit),
       stripQuery: formData.get("stripQuery") === "on",
     },
+    environmentSetupCommand: field("environmentSetupCommand"),
     installCommand: field("installCommand"),
     pages: {
       added: pathList(field("addedPages")),

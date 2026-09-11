@@ -17,6 +17,8 @@ export interface RunRequest {
   onFailure?: (error: unknown) => void;
   development?: { installCommand: string; startCommand: string };
   environment: Record<string, string>;
+  /** Host setup exports also available to installation. */
+  setupEnvironment?: Record<string, string>;
   image: string;
   labels: Record<string, string>;
   /** The port the application listens on inside the container. */

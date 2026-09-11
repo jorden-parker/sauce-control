@@ -79,6 +79,31 @@ export class StartupProgressTracker {
   snapshot(): StartupProgress {
     return structuredClone(this.value);
   }
+  beginEnvironmentSetup(): void {
+    this.value.steps.unshift({
+      key: "environment",
+      label: "Prepare environment",
+      scope: "comparison",
+      state: "pending",
+    });
+    this.begin("comparison", "environment");
+    this.detail(
+      "comparison",
+      "environment",
+      "Running setup on your computer. Complete browser login if prompted. Terminal prompts are not supported."
+    );
+  }
+  completeEnvironmentSetup(): void {
+    const step = this.value.steps.find((entry) => entry.key === "environment");
+    if (!step || this.value.outcome !== "starting") {
+      return;
+    }
+    step.state = "complete";
+    step.endedAt = Date.now();
+    step.detail = "Environment setup completed (exit 0).";
+    this.message("comparison", step.detail);
+    this.changed();
+  }
   private message(scope: ProgressScope, text: string): void {
     this.value.messages.push({ at: Date.now(), scope, text });
     // Retain the latest messages; step timings remain available independently.
@@ -88,7 +113,7 @@ export class StartupProgressTracker {
   }
   begin(
     scope: ProgressScope,
-    key: InstanceStep | "discovery" | "affected"
+    key: InstanceStep | "discovery" | "affected" | "environment"
   ): void {
     if (this.value.outcome !== "starting") {
       return;

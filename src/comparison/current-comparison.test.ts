@@ -72,6 +72,17 @@ describe("currentComparison", () => {
   });
   afterEach(async () => {
     await comparison.stopCurrentComparison();
+    const store = settings.settings(),
+      repository = store.getComparisonSelection()?.repository;
+    if (repository) {
+      const config = store.getRepositoryConfig(repository);
+      if (config?.environmentSetupCommand) {
+        store.saveRepositoryConfig(repository, {
+          ...config,
+          environmentSetupCommand: "",
+        });
+      }
+    }
     runComparison.mockClear();
   });
   afterAll(() => {
@@ -155,6 +166,113 @@ describe("currentComparison", () => {
       expect.objectContaining({ config })
     );
   });
+  it("captures setup once before starting either Instance, overrides files, and refreshes on retry", async () => {
+    const store = settings.settings(),
+      repository = "setup-app",
+      file = join(process.env.SAUCE_CONTROL_DATA_DIR!, "setup.env");
+    writeFileSync(file, "API_URL=old\nNODE_AUTH_TOKEN=old\n");
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository,
+      targetBranch: "feature",
+    });
+    store.saveEnvironmentFiles(repository, [file]);
+    const config = {
+      crawl: DEFAULT_CRAWL_LIMITS,
+      environmentSetupCommand: "export API_URL=fresh NODE_AUTH_TOKEN=first",
+      installCommand: "pnpm install",
+      pages: { added: [], removed: [] },
+      port: 3000,
+      startCommand: "pnpm dev",
+    };
+    store.saveRepositoryConfig(repository, config);
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() => expect(runComparison).toHaveBeenCalledOnce());
+    expect(runComparison.mock.calls[0]![1]).toMatchObject({
+      environment: { API_URL: "fresh", NODE_AUTH_TOKEN: "first" },
+      setupEnvironment: { API_URL: "fresh", NODE_AUTH_TOKEN: "first" },
+    });
+    expect(
+      comparison.currentComparisonSnapshot().progress?.steps
+    ).toContainEqual(
+      expect.objectContaining({ key: "environment", state: "complete" })
+    );
+    expect(
+      JSON.stringify(comparison.currentComparisonSnapshot())
+    ).not.toContain("NODE_AUTH_TOKEN");
+    await comparison.stopCurrentComparison();
+    store.saveRepositoryConfig(repository, {
+      ...config,
+      environmentSetupCommand:
+        "export API_URL=refreshed NODE_AUTH_TOKEN=second",
+    });
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() => expect(runComparison).toHaveBeenCalledTimes(2));
+    expect(runComparison.mock.calls[1]![1].environment).toEqual({
+      API_URL: "refreshed",
+      NODE_AUTH_TOKEN: "second",
+    });
+  });
+
+  it("stops before starting Instances when setup fails and reports only a safe exit status", async () => {
+    const store = settings.settings(),
+      repository = "setup-failure";
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository,
+      targetBranch: "feature",
+    });
+    store.saveRepositoryConfig(repository, {
+      crawl: DEFAULT_CRAWL_LIMITS,
+      environmentSetupCommand: "echo synthetic-private-output >&2; exit 42",
+      installCommand: "pnpm install",
+      pages: { added: [], removed: [] },
+      port: 3000,
+      startCommand: "pnpm dev",
+    });
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() =>
+      expect(comparison.currentComparisonSnapshot()).toMatchObject({
+        progress: { cleanup: "complete" },
+        status: { kind: "failed", message: expect.stringContaining("exit 42") },
+      })
+    );
+    expect(runComparison).not.toHaveBeenCalled();
+    expect(
+      JSON.stringify(comparison.currentComparisonSnapshot())
+    ).not.toContain("synthetic-private-output");
+  });
+
+  it("returns while setup waits and lets cancellation prevent installation", async () => {
+    const store = settings.settings(),
+      repository = "setup-cancel";
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository,
+      targetBranch: "feature",
+    });
+    store.saveRepositoryConfig(repository, {
+      crawl: DEFAULT_CRAWL_LIMITS,
+      environmentSetupCommand: "sleep 30",
+      installCommand: "pnpm install",
+      pages: { added: [], removed: [] },
+      port: 3000,
+      startCommand: "pnpm dev",
+    });
+    await comparison.startCurrentComparison();
+    expect(
+      comparison.currentComparisonSnapshot().progress?.steps
+    ).toContainEqual(
+      expect.objectContaining({ key: "environment", state: "active" })
+    );
+    await comparison.stopCurrentComparison();
+    expect(comparison.currentComparisonSnapshot()).toMatchObject({
+      progress: { cleanup: "complete" },
+      status: { kind: "cancelled" },
+    });
+    expect(runComparison).not.toHaveBeenCalled();
+  });
+
   it.each([
     "docker is not running. Start it from Settings and try again.",
     "Dependency installation failed. Check NODE_AUTH_TOKEN in Environment Files on Compare.",

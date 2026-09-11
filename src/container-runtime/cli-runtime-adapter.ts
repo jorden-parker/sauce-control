@@ -150,6 +150,9 @@ export const createCliRuntimeAdapter = (
             input: JSON.stringify({
               environment,
               port: request.port,
+              setupEnvironment: restarting
+                ? undefined
+                : request.setupEnvironment,
               ...request.development,
               ...(restarting ? { installCommand: "" } : {}),
             }),
@@ -362,6 +365,9 @@ export const createCliRuntimeAdapter = (
             environment: { ...environment },
             onFailure: undefined,
             onProgress: undefined,
+            setupEnvironment: request.setupEnvironment
+              ? { ...request.setupEnvironment }
+              : undefined,
             signal: undefined,
           });
         }

@@ -37,6 +37,7 @@ export interface InstanceRequest {
   codeDirectory?: string | undefined;
   config: RepositoryConfig;
   environment: Record<string, string>;
+  setupEnvironment?: Record<string, string>;
   environmentFiles?: string[];
   organisation: string;
   readiness: { pollIntervalMs: number; timeoutMs: number };
@@ -178,6 +179,7 @@ export const runInstance = async (
       onFailure: request.onFailure,
       onProgress: request.onProgress,
       port: config.port,
+      setupEnvironment: request.setupEnvironment,
       signal: request.signal,
     }
   );

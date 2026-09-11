@@ -18,6 +18,8 @@ Read each branch's `package.json`. Discover `scripts.dev`, then `scripts.develop
 
 Only `NODE_AUTH_TOKEN` from the merged variables reaches dependency installation. The development server receives the remaining imported variables, without `NODE_AUTH_TOKEN`. This split applies equally to file values and existing keychain values.
 
+The later [Environment Setup Command design](./environment-setup-command-design.md) extends this: additional exports captured from an explicit host setup command override matching file values and may reach both stages. `NODE_AUTH_TOKEN` remains installation-only, and Environment Files remain literal data.
+
 Deliver structured values through stdin to a trusted launcher inside the container. Never put values into command arguments, host CLI environment overrides, container environment configuration or a separate secret store. The launcher creates the appropriate environment only for the intended child process. It must handle installation failure, readiness, process supervision, stopping and restart reinjection.
 
 Suppress raw installation and server output at its source. Show controlled progress and safe error summaries only. Neither Sauce Control nor the runtime logger may persist or display raw child output.

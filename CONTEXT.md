@@ -32,6 +32,9 @@ _Avoid_: Deployment, server, preview, environment
 A user-selected file containing named values needed to install dependencies or run the development servers of a Comparison. A Comparison can use multiple Environment Files, whose values may include credentials.
 _Avoid_: Secret file (not every value is a secret)
 
+**Environment Setup Command**:
+A user-provided command that prepares additional environment variables for a Comparison. It is separate from the dependency installation command.
+
 **Leftover**:
 An Instance, its image, or its clone directory whose owning Sauce Control process has exited. Removed when Sauce Control starts and when it exits.
 _Avoid_: Orphan, stale container, zombie

@@ -29,7 +29,7 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
       busy = true;
       if (payload.installCommand) {
         socket.write('installing\n');
-        const installEnv = { ...base };
+        const installEnv = { ...payload.setupEnvironment, ...base, PORT: String(payload.port) };
         if (payload.environment.NODE_AUTH_TOKEN !== undefined) installEnv.NODE_AUTH_TOKEN = payload.environment.NODE_AUTH_TOKEN;
         const tokenStatus = installEnv.NODE_AUTH_TOKEN === undefined ? 'absent' : installEnv.NODE_AUTH_TOKEN.length ? 'present' : 'empty';
         child = execute(payload.installCommand, installEnv, true);
@@ -57,6 +57,7 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
         if (status !== 0) { busy = false; socket.end('installation-failed:' + (errorCodes[errorIndex] || 'unknown') + ':' + tokenStatus + ':' + status); return; }
       }
       socket.write('starting\n');
+      delete payload.setupEnvironment;
       const environment = { ...base, ...payload.environment, NODE_ENV: 'development', PORT: String(payload.port) };
       delete environment.NODE_AUTH_TOKEN;
       delete payload.environment.NODE_AUTH_TOKEN;

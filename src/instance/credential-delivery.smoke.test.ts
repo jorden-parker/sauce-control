@@ -9,6 +9,7 @@ import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { runInstance } from "./run-instance";
 import { openSettingsStore } from "@/settings/settings-store";
 import { readEnvironmentFiles } from "@/repository-config/environment-files";
+import { runEnvironmentSetup } from "@/repository-config/environment-setup";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -31,6 +32,7 @@ describe.each(["docker", "podman"] as const)(
           fixture = join(root, "fixture"),
           sessionId = randomUUID(),
           token = `install-${randomUUID()}`,
+          setupValue = `setup-${randomUUID()}`,
           api = `runtime-${randomUUID()}\nsecond line`,
           shell = (args: string[]) =>
             nodeCommandRunner.run(runtime, args, { timeoutMs: 60_000 }),
@@ -45,6 +47,12 @@ describe.each(["docker", "podman"] as const)(
           store.getEnvironmentFiles("credential-smoke")
         );
         store.close();
+        const setupFile = join(root, "setup.sh");
+        writeFileSync(setupFile, `export SETUP_CREDENTIAL=${setupValue}\n`);
+        const setupEnvironment = await runEnvironmentSetup(
+          `source '${setupFile}'`
+        );
+        Object.assign(environment, setupEnvironment);
         mkdirSync(fixture);
         writeFileSync(
           join(fixture, "package.json"),
@@ -75,11 +83,11 @@ describe.each(["docker", "podman"] as const)(
         );
         writeFileSync(
           join(fixture, "install.cjs"),
-          `const fs=require('node:fs'),crypto=require('node:crypto'); console.log(process.env.NODE_AUTH_TOKEN); console.error(Buffer.from(process.env.NODE_AUTH_TOKEN).toString('base64')); fs.writeFileSync('.install-check.json', JSON.stringify({hash:crypto.createHash('sha256').update(process.env.NODE_AUTH_TOKEN).digest('hex'),runtimeAbsent:process.env.API_TOKEN===undefined}));`
+          `const fs=require('node:fs'),crypto=require('node:crypto'); console.log(process.env.NODE_AUTH_TOKEN); console.log(process.env.SETUP_CREDENTIAL); console.error(Buffer.from(process.env.NODE_AUTH_TOKEN).toString('base64')); fs.writeFileSync('.install-check.json', JSON.stringify({hash:crypto.createHash('sha256').update(process.env.NODE_AUTH_TOKEN).digest('hex'),setupHash:crypto.createHash('sha256').update(process.env.SETUP_CREDENTIAL).digest('hex'),runtimeAbsent:process.env.API_TOKEN===undefined}));`
         );
         writeFileSync(
           join(fixture, "server.cjs"),
-          `const fs=require('node:fs'),crypto=require('node:crypto'); console.log(process.env.API_TOKEN); console.error(Buffer.from(process.env.API_TOKEN).toString('base64')); require('node:http').createServer((q,r)=>r.end(JSON.stringify({install:JSON.parse(fs.readFileSync('.install-check.json','utf8')),runtimeHash:crypto.createHash('sha256').update(process.env.API_TOKEN).digest('hex'),tokenAbsent:process.env.NODE_AUTH_TOKEN===undefined,excluded:!fs.existsSync('.env.local')&&!fs.existsSync('.git')}))).listen(Number(process.env.PORT),'0.0.0.0');`
+          `const fs=require('node:fs'),crypto=require('node:crypto'); console.log(process.env.API_TOKEN); console.log(process.env.SETUP_CREDENTIAL); console.error(Buffer.from(process.env.API_TOKEN).toString('base64')); require('node:http').createServer((q,r)=>r.end(JSON.stringify({install:JSON.parse(fs.readFileSync('.install-check.json','utf8')),runtimeHash:crypto.createHash('sha256').update(process.env.API_TOKEN).digest('hex'),setupHash:crypto.createHash('sha256').update(process.env.SETUP_CREDENTIAL).digest('hex'),tokenAbsent:process.env.NODE_AUTH_TOKEN===undefined,excluded:!fs.existsSync('.env.local')&&!fs.existsSync('.git')}))).listen(Number(process.env.PORT),'0.0.0.0');`
         );
         writeFileSync(join(fixture, ".env.local"), `NODE_AUTH_TOKEN=${token}`);
         mkdirSync(join(fixture, ".git"));
@@ -118,6 +126,7 @@ describe.each(["docker", "podman"] as const)(
                 repository: "credential-smoke",
                 runtime,
                 sessionId,
+                setupEnvironment,
                 token: "unused",
                 workDirectory: join(root, "clones"),
               }
@@ -135,8 +144,13 @@ describe.each(["docker", "podman"] as const)(
           expect(JSON.stringify(progress)).not.toContain(api);
           const expected = {
             excluded: true,
-            install: { hash: digest(token), runtimeAbsent: true },
+            install: {
+              hash: digest(token),
+              runtimeAbsent: true,
+              setupHash: digest(setupValue),
+            },
             runtimeHash: digest(api),
+            setupHash: digest(setupValue),
             tokenAbsent: true,
           };
           expect(
@@ -144,6 +158,7 @@ describe.each(["docker", "podman"] as const)(
           ).toEqual(expected);
           const inspected = (await shell(["inspect", id])).stdout;
           expect(inspected).not.toContain(token);
+          expect(inspected).not.toContain(setupValue);
           expect(inspected).not.toContain(api.split("\n")[0]);
           expect(inspected).not.toContain("must-not-affect-host-cli");
           const history = (
@@ -154,10 +169,13 @@ describe.each(["docker", "podman"] as const)(
             ])
           ).stdout;
           expect(history).not.toContain(token);
+          expect(history).not.toContain(setupValue);
           expect(history).not.toContain("node install.cjs");
           const logs = await shell(["logs", id]).catch(() => ({ stdout: "" }));
           expect(logs.stdout).toBe("");
           environment.API_TOKEN = "edited-after-start";
+          setupEnvironment.SETUP_CREDENTIAL = "edited-after-start";
+          environment.SETUP_CREDENTIAL = "edited-after-start";
           await adapter.stopContainers(runtime, [id]);
           await adapter.startContainers(runtime, [id]);
           await expect
