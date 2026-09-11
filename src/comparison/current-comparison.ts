@@ -1,3 +1,4 @@
+import { ComparisonStartError } from "./comparison-start-error";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeAdapter } from "@/container-runtime/runtime";
@@ -225,16 +226,18 @@ export const startCurrentComparison = async (
         status = {
           kind: "failed",
           message:
-            error instanceof EnvironmentFileError
+            error instanceof EnvironmentFileError ||
+            error instanceof ComparisonStartError
               ? error.message
-              : "Could not start the Comparison. Check the development commands, credentials and Container Runtime. Raw logs are suppressed.",
+              : "Could not start the Comparison. Open Compare → Configure repository to check the installation command, development server command and Port; check Environment Files on Compare and Container Runtime in Settings. Raw logs are suppressed to protect credentials.",
         };
       });
   } catch (error) {
     status = {
       kind: "failed",
       message:
-        error instanceof EnvironmentFileError
+        error instanceof EnvironmentFileError ||
+        error instanceof ComparisonStartError
           ? error.message
           : "Could not load the Comparison configuration. Check Repository settings and credentials.",
     };

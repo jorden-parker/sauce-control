@@ -1,3 +1,4 @@
+import { ComparisonStartError } from "./comparison-start-error";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,6 +119,36 @@ describe("currentComparison", () => {
     expect(runComparison).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ config })
+    );
+  });
+  it.each([
+    "docker is not running. Start it from Settings and try again.",
+    "Dependency installation failed. Check NODE_AUTH_TOKEN in Environment Files on Compare.",
+    "Development server did not listen on port 3000. Check Port in Repository Config.",
+  ])("preserves a controlled startup error: %s", async (message) => {
+    runComparison.mockRejectedValueOnce(new ComparisonStartError(message));
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() => {
+      expect(comparison.currentComparison()).toEqual({
+        kind: "failed",
+        message,
+      });
+    });
+  });
+
+  it("suppresses arbitrary errors even when they resemble a safe summary", async () => {
+    runComparison.mockRejectedValueOnce(
+      new Error("Dependency installation failed: secret-token")
+    );
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() => {
+      expect(comparison.currentComparison()).toEqual({
+        kind: "failed",
+        message: expect.stringContaining("Open Compare → Configure repository"),
+      });
+    });
+    expect(JSON.stringify(comparison.currentComparison())).not.toContain(
+      "secret-token"
     );
   });
 });

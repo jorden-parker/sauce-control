@@ -1,3 +1,4 @@
+import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
 import type {
   ContainerDetails,
@@ -142,10 +143,10 @@ export const createCliRuntimeAdapter = (
       } catch (error) {
         // No child output, payload or original error may escape this boundary.
         // oxlint-disable-next-line preserve-caught-error -- Causes can contain credentials in runtime output.
-        throw new Error(
+        throw new ComparisonStartError(
           error instanceof Error && error.message === "installation-failed"
-            ? "Dependency installation failed. Check the installation command and NODE_AUTH_TOKEN. Raw logs are suppressed."
-            : `Could not securely start the development server with ${name}. Check runtime support for interactive exec and the development command. Raw logs are suppressed.`
+            ? "Dependency installation failed. Open Compare → Configure repository and check the Dependency installation command. Check NODE_AUTH_TOKEN in Environment Files on Compare or Environment variables in Repository Config. Raw logs are suppressed to protect credentials."
+            : `Could not securely start the development server with ${name}. Check Container Runtime in Settings for interactive exec support, and Development server command in Compare → Configure repository. Raw logs are suppressed to protect credentials.`
         );
       }
     },

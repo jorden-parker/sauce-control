@@ -1,3 +1,4 @@
+import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { describe, expect, it } from "vitest";
 import { createCliRuntimeAdapter } from "./cli-runtime-adapter";
 import type { RunOptions } from "@/shell/command-runner";
@@ -37,10 +38,47 @@ describe.each(["docker", "podman"] as const)(
         });
         throw new Error("expected failure");
       } catch (error) {
+        expect(error).toBeInstanceOf(ComparisonStartError);
         expect(String(error)).toContain("securely");
         expect(String(error)).not.toContain("raw-secret");
         expect((error as Error).cause).toBeUndefined();
       }
+    });
+    it("reports installation failure with the settings to check", async () => {
+      const adapter = createCliRuntimeAdapter(
+        {
+          run: async (_name, args, options) => ({
+            stdout:
+              args[0] === "exec"
+                ? JSON.parse(options.input!).probe
+                  ? "ready"
+                  : "installation-failed"
+                : args[0] === "run"
+                  ? "id"
+                  : args[0] === "port"
+                    ? "127.0.0.1:4000"
+                    : "[]",
+          }),
+        },
+        { platform: "linux" }
+      );
+      await expect(
+        adapter.runContainer(runtime, {
+          development: {
+            installCommand: "npm ci",
+            startCommand: "npm run dev",
+          },
+          environment: { NODE_AUTH_TOKEN: "private-token" },
+          image: "test",
+          labels: {},
+          port: 3000,
+        })
+      ).rejects.toMatchObject({
+        constructor: ComparisonStartError,
+        message: expect.stringContaining(
+          "Dependency installation failed. Open Compare"
+        ),
+      });
     });
     it("uses only stdin, reinjects its snapshot on restart, and forgets it on removal", async () => {
       const calls: { args: string[]; options: RunOptions }[] = [],

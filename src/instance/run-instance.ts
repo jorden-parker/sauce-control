@@ -1,3 +1,4 @@
+import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -62,10 +63,12 @@ const slug = (text: string): string =>
   ): Promise<void> => {
     const status = await adapter.detect(name);
     if (!status.installed) {
-      throw new Error(`${name} is not installed. Install it and try again.`);
+      throw new ComparisonStartError(
+        `${name} is not installed. Install it and try again.`
+      );
     }
     if (!status.running) {
-      throw new Error(
+      throw new ComparisonStartError(
         `${name} is not running. Start it from Settings and try again.`
       );
     }
@@ -82,8 +85,8 @@ const slug = (text: string): string =>
         }
         if (Date.now() >= deadline) {
           await adapter.removeContainers(runtime, [containerId]);
-          throw new Error(
-            `${branch} did not listen on port ${config.port} within ${readiness.timeoutMs}ms. Check the start command and try again.`
+          throw new ComparisonStartError(
+            `${branch} did not listen on port ${config.port} within ${readiness.timeoutMs}ms. Open Compare → Configure repository and check Development server command and Port. Check Environment Files on Compare for required app credentials.`
           );
         }
         await sleep(readiness.pollIntervalMs);
@@ -114,7 +117,11 @@ export const runInstance = async (
       token: request.token,
     },
     requestLog
-  );
+  ).catch(() => {
+    throw new ComparisonStartError(
+      "Could not clone the Repository branch. Check the selected branches on Compare, GitHub access in Settings, and the network connection."
+    );
+  });
   validateInstanceEnvironment(environment, config.port);
   const { context, development } = prepareDevelopmentContext(
     clonePath,
@@ -128,8 +135,8 @@ export const runInstance = async (
       tag,
     });
   } catch {
-    throw new Error(
-      "Could not prepare the development container. Check the Container Runtime and network connection."
+    throw new ComparisonStartError(
+      "Could not prepare the development container. Check Container Runtime in Settings and the network connection."
     );
   } finally {
     rmSync(context, { force: true, recursive: true });
