@@ -1,3 +1,5 @@
+import { detectSchemaSources } from "@/scenarios/detect-schema-sources";
+import type { ScenarioConfig } from "@/settings/settings-store";
 import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { EndpointRecordings } from "@/endpoints/endpoint-recordings";
@@ -43,11 +45,13 @@ const hostPort = (server: Server): number =>
 export const runStubComparison = async ({
   recordings,
   repository,
-}: {
+  schemaSources,
+  manualScenarios,
+}: Partial<ScenarioConfig> & {
   recordings: EndpointRecordings;
   repository: string;
 }): Promise<RunningComparison> => {
-  const collection = createScenarioCollection(),
+  const collection = createScenarioCollection(schemaSources, manualScenarios),
     api = await serveApi(),
     apiOrigin = `http://127.0.0.1:${hostPort(api)}`,
     servers = await Promise.all(
@@ -74,6 +78,8 @@ export const runStubComparison = async ({
     });
   return {
     base: instance("base", base),
+    detectSchemaSources: (codeDirectory) =>
+      detectSchemaSources(codeDirectory ? [codeDirectory] : []),
     proxy,
     scenarios: collection.scenarios,
     stop: async () => {

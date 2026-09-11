@@ -1,3 +1,5 @@
+import type { SchemaSource } from "@/scenarios/schema-sources";
+import type { ManualScenario } from "@/scenarios/scenarios";
 import { DatabaseSync } from "node:sqlite";
 import {
   type RuntimeName,
@@ -31,7 +33,14 @@ export interface RepositoryConfig {
   useDotEnvLocal?: boolean;
 }
 
+export interface ScenarioConfig {
+  schemaSources: SchemaSource[];
+  manualScenarios: ManualScenario[];
+}
+
 export interface SettingsStore {
+  getScenarioConfig: (repository: string) => ScenarioConfig;
+  saveScenarioConfig: (repository: string, config: ScenarioConfig) => void;
   close: () => void;
   getCodeDirectory: () => string | undefined;
   getComparisonSelection: () => ComparisonSelection | undefined;
@@ -101,7 +110,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     getEnvironmentFiles: (repository) => {
       const value = read(`environment-files:${repository}`);
-      if (value === undefined) return [];
+      if (value === undefined) {
+        return [];
+      }
       const paths: unknown = JSON.parse(value);
       return Array.isArray(paths) &&
         paths.every((path) => typeof path === "string")
@@ -125,6 +136,12 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
           }
         : undefined;
     },
+    getScenarioConfig: (repository) => {
+      const value = read(`scenarios:${repository}`);
+      return value === undefined
+        ? { manualScenarios: [], schemaSources: [] }
+        : (JSON.parse(value) as ScenarioConfig);
+    },
     saveCodeDirectory: (directory) => {
       upsert.run(CODE_DIRECTORY_KEY, directory);
     },
@@ -142,6 +159,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     saveRepositoryConfig: (repository, config) => {
       upsert.run(repositoryConfigKey(repository), JSON.stringify(config));
+    },
+    saveScenarioConfig: (repository, config) => {
+      upsert.run(`scenarios:${repository}`, JSON.stringify(config));
     },
   };
 };

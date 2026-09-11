@@ -9,11 +9,13 @@ export const RunPanel = ({
   repository,
   paths,
   canRun,
+  manualScenarioNames,
   status,
 }: {
   repository: string;
   paths: string[];
   canRun: boolean;
+  manualScenarioNames: string[];
   status: ComparisonStatus;
 }) => {
   const [dirty, setDirty] = useState(false);
@@ -30,7 +32,11 @@ export const RunPanel = ({
           Save the file paths before running.
         </p>
       ) : null}
-      <ComparisonStatusPanel canRun={canRun && !dirty} status={status} />
+      <ComparisonStatusPanel
+        manualScenarioNames={manualScenarioNames}
+        canRun={canRun && !dirty}
+        status={status}
+      />
     </>
   );
 };

@@ -88,6 +88,9 @@ export default async function ComparePage() {
                 repository={saved.repository}
                 paths={settings().getEnvironmentFiles(saved.repository)}
                 canRun={canRun}
+                manualScenarioNames={settings()
+                  .getScenarioConfig(saved.repository)
+                  .manualScenarios.map(({ name }) => name)}
                 status={status}
               />
             </CardContent>

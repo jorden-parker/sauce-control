@@ -1,3 +1,5 @@
+import { detectSchemaSources } from "@/scenarios/detect-schema-sources";
+import type { SchemaSource } from "@/scenarios/schema-sources";
 import type { EndpointRecordings } from "@/endpoints/endpoint-recordings";
 import {
   type Instance,
@@ -6,9 +8,15 @@ import {
   runInstance,
 } from "@/instance/run-instance";
 import { type Proxy, startProxy } from "@/proxy/proxy";
-import { type Scenario, createScenarioCollection } from "@/scenarios/scenarios";
+import {
+  type ManualScenario,
+  type Scenario,
+  createScenarioCollection,
+} from "@/scenarios/scenarios";
 
 export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
+  manualScenarios?: ManualScenario[];
+  schemaSources?: SchemaSource[];
   baseBranch: string;
   targetBranch: string;
 }
@@ -21,6 +29,7 @@ export interface ComparisonDependencies extends InstanceDependencies {
 
 /** Both Instances of a Comparison, up and reachable through the Proxy. */
 export interface RunningComparison {
+  detectSchemaSources: (codeDirectory?: string) => Promise<SchemaSource[]>;
   base: Instance;
   proxy: Proxy;
   scenarios: () => Scenario[];
@@ -32,10 +41,16 @@ export interface RunningComparison {
 /** Builds and starts both branches concurrently, then fronts them with one Proxy. */
 export const runComparison = async (
   dependencies: ComparisonDependencies,
-  { baseBranch, targetBranch, ...shared }: ComparisonRequest
+  {
+    baseBranch,
+    targetBranch,
+    schemaSources,
+    manualScenarios,
+    ...shared
+  }: ComparisonRequest
 ): Promise<RunningComparison> => {
   const { recordings, runtime, localEndpointOrigins } = dependencies,
-    collection = createScenarioCollection(),
+    collection = createScenarioCollection(schemaSources, manualScenarios),
     removeAll = async (instances: Instance[]) => {
       await runtime.removeContainers(
         shared.runtime,
@@ -74,6 +89,12 @@ export const runComparison = async (
     });
   return {
     base,
+    detectSchemaSources: (codeDirectory) =>
+      detectSchemaSources([
+        base.clonePath,
+        target.clonePath,
+        codeDirectory ?? shared.codeDirectory ?? "",
+      ]),
     proxy,
     scenarios: collection.scenarios,
     stop: async () => {

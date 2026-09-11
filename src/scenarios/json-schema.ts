@@ -1,6 +1,8 @@
 /** The JSON Schema vocabulary inferred from observed response bodies. */
 export interface JsonSchema {
   anyOf?: JsonSchema[];
+  allOf?: JsonSchema[];
+  enum?: unknown[];
   items?: JsonSchema;
   properties?: Record<string, JsonSchema>;
   required?: string[];
@@ -19,13 +21,16 @@ export const mergeSchemas = (
   left: JsonSchema,
   right: JsonSchema
 ): JsonSchema => {
-  if (Object.keys(left).length === 0) return right;
-  if (Object.keys(right).length === 0) return left;
+  if (Object.keys(left).length === 0) {
+    return right;
+  }
+  if (Object.keys(right).length === 0) {
+    return left;
+  }
   if (left.type === "object" && right.type === "object") {
     const a = left.properties ?? {},
       b = right.properties ?? {};
     return {
-      type: "object",
       properties: Object.fromEntries(
         [...new Set([...Object.keys(a), ...Object.keys(b)])].map((key) => [
           key,
@@ -35,20 +40,25 @@ export const mergeSchemas = (
       required: (left.required ?? []).filter((key) =>
         right.required?.includes(key)
       ),
+      type: "object",
     };
   }
-  if (left.type === "array" && right.type === "array")
+  if (left.type === "array" && right.type === "array") {
     return {
-      type: "array",
       items: mergeSchemas(left.items ?? {}, right.items ?? {}),
+      type: "array",
     };
-  if (left.type !== undefined && left.type === right.type) return left;
+  }
+  if (left.type !== undefined && left.type === right.type) {
+    return left;
+  }
   if (
     [left.type, right.type].every(
       (type) => type === "integer" || type === "number"
     )
-  )
+  ) {
     return { type: "number" };
+  }
   const alternatives: JsonSchema[] = [];
   for (const schema of [
     ...(left.anyOf ?? [left]),
@@ -61,55 +71,84 @@ export const mergeSchemas = (
           (type) => type === "integer" || type === "number"
         )
     );
-    if (index === -1) alternatives.push(schema);
-    else alternatives[index] = mergeSchemas(alternatives[index]!, schema);
+    if (index === -1) {
+      alternatives.push(schema);
+    } else {
+      alternatives[index] = mergeSchemas(alternatives[index]!, schema);
+    }
   }
   return { anyOf: alternatives };
 };
 
 export const inferSchema = (value: unknown): JsonSchema => {
-  if (value === null) return { type: "null" };
-  if (Array.isArray(value))
+  if (value === null) {
+    return { type: "null" };
+  }
+  if (Array.isArray(value)) {
     return {
-      type: "array",
       items: value.map(inferSchema).reduce(mergeSchemas, {}),
+      type: "array",
     };
+  }
   if (typeof value === "object") {
     return {
-      type: "object",
       properties: Object.fromEntries(
         Object.entries(value).map(([key, item]) => [key, inferSchema(item)])
       ),
       required: Object.keys(value),
+      type: "object",
     };
   }
-  if (typeof value === "number")
+  if (typeof value === "number") {
     return { type: Number.isInteger(value) ? "integer" : "number" };
-  if (typeof value === "boolean") return { type: "boolean" };
+  }
+  if (typeof value === "boolean") {
+    return { type: "boolean" };
+  }
   return { type: "string" };
 };
 
 /** Empty collections and scalar defaults retain the observed object's shape. */
 export const emptyValue = (schema: JsonSchema): unknown => {
-  if (schema.anyOf?.[0] !== undefined) return emptyValue(schema.anyOf[0]);
+  if (schema.enum?.length) {
+    return schema.enum[0];
+  }
+  if (schema.allOf?.length) {
+    const values = schema.allOf.map(emptyValue);
+    return values.every(
+      (value) =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+    )
+      ? Object.assign({}, ...values)
+      : values.at(-1);
+  }
+  if (schema.anyOf?.[0] !== undefined) {
+    return emptyValue(schema.anyOf[0]);
+  }
   switch (schema.type) {
-    case "array":
+    case "array": {
       return [];
-    case "object":
+    }
+    case "object": {
       return Object.fromEntries(
         Object.entries(schema.properties ?? {}).map(([key, property]) => [
           key,
           emptyValue(property),
         ])
       );
-    case "string":
+    }
+    case "string": {
       return "";
+    }
     case "integer":
-    case "number":
+    case "number": {
       return 0;
-    case "boolean":
+    }
+    case "boolean": {
       return false;
-    default:
+    }
+    default: {
       return null;
+    }
   }
 };

@@ -24,6 +24,10 @@ export const stubGitHubClient: GitHubClient = {
     ]),
   readFile: (_organisation, repository, path) =>
     Promise.resolve(
-      path === "package.json" ? MANIFESTS[repository] : undefined
+      path === "package.json"
+        ? MANIFESTS[repository]
+        : repository === "docs" && path === "openapi.yaml"
+          ? "openapi: 3.0.3\ninfo:\n  title: Docs API\n  version: '1'\npaths: {}\n"
+          : undefined
     ),
 };

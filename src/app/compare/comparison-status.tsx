@@ -86,8 +86,10 @@ const POLL_MS = 2000,
 export const ComparisonStatusPanel = ({
   canRun,
   status,
+  manualScenarioNames = [],
 }: {
   canRun: boolean;
+  manualScenarioNames?: string[];
   status: ComparisonStatus;
 }) => {
   const router = useRouter();
@@ -168,7 +170,7 @@ export const ComparisonStatusPanel = ({
               className="h-9 rounded-md border bg-background px-3 text-sm"
               aria-describedby="scenario-help"
             >
-              {SCENARIO_NAMES.map((name) => (
+              {[...SCENARIO_NAMES, ...manualScenarioNames].map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>

@@ -1,4 +1,5 @@
 import { ComparisonStartError } from "./comparison-start-error";
+import { detectSchemaSources } from "@/scenarios/detect-schema-sources";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeAdapter } from "@/container-runtime/runtime";
@@ -27,7 +28,7 @@ import { type RunningComparison, runComparison } from "./run-comparison";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { runStubComparison } from "./stub-comparison";
-import { type ScenarioName, isScenarioName } from "@/scenarios/scenario-name";
+import { isScenarioName } from "@/scenarios/scenario-name";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
@@ -39,7 +40,7 @@ export type ComparisonStatus =
       discovery: Discovery;
       kind: "running";
       repository: string;
-      scenario: ScenarioName;
+      scenario: string;
       mockedEndpoints: number;
       urls: { base: string; target: string };
     };
@@ -97,6 +98,7 @@ const gather = async () => {
   if (useStub()) {
     return {
       ...selection,
+      ...store.getScenarioConfig(selection.repository),
       discovery: store.getRepositoryConfig(selection.repository) ?? {
         crawl: DEFAULT_CRAWL_LIMITS,
         pages: DEFAULT_MANUAL_PAGES,
@@ -126,6 +128,7 @@ const gather = async () => {
   validateInstanceEnvironment(loaded.environment, config.port);
   return {
     ...selection,
+    ...store.getScenarioConfig(selection.repository),
     codeDirectory: store.getCodeDirectory(),
     config,
     environment: loaded.environment,
@@ -140,7 +143,7 @@ const gather = async () => {
 
 /** Starts the saved Comparison in the background; the status reports progress. */
 export const startCurrentComparison = async (
-  scenarioName: ScenarioName = "recorded"
+  scenarioName: string = "recorded"
 ): Promise<void> => {
   if (status.kind === "starting" || status.kind === "running") {
     return;
@@ -151,7 +154,13 @@ export const startCurrentComparison = async (
     stage: "instances",
   };
   try {
-    if (!isScenarioName(scenarioName)) {
+    const selectedRepository = settings().getComparisonSelection()?.repository;
+    if (
+      !isScenarioName(scenarioName) &&
+      !settings()
+        .getScenarioConfig(selectedRepository ?? "")
+        .manualScenarios.some(({ name }) => name === scenarioName)
+    ) {
       throw new Error("Choose a valid Scenario.");
     }
     const request = await gather();
@@ -174,8 +183,10 @@ export const startCurrentComparison = async (
             { ...request, workDirectory }
           )
         : runStubComparison({
+            manualScenarios: request.manualScenarios,
             recordings: endpointRecordings(),
             repository: request.repository,
+            schemaSources: request.schemaSources,
           });
     run
       .then(async (comparison) => {
@@ -220,7 +231,7 @@ export const startCurrentComparison = async (
         await running?.stop().catch(() => {});
         running = undefined;
         if (workDirectory) {
-          rmSync(workDirectory, { recursive: true, force: true });
+          rmSync(workDirectory, { force: true, recursive: true });
         }
         workDirectory = undefined;
         status = {
@@ -267,3 +278,12 @@ export const stopCurrentComparison = async (): Promise<void> => {
     workDirectory = undefined;
   }
 };
+
+/** Only the selected Repository's live clones and the reviewer's Code Directory. */
+export const detectCurrentSchemaSources = async (
+  repository: string,
+  codeDirectory?: string
+) =>
+  running && "repository" in status && status.repository === repository
+    ? running.detectSchemaSources(codeDirectory)
+    : detectSchemaSources(codeDirectory ? [codeDirectory] : []);

@@ -7,7 +7,6 @@ import {
 } from "@/comparison/current-comparison";
 import { gitHubClient } from "@/github/github";
 import { settings } from "@/settings/settings";
-import { isScenarioName } from "@/scenarios/scenario-name";
 
 /** Branch names of one Repository in the saved Organisation, for the Target Branch ComboBox. */
 export const listBranches = async (repository: string): Promise<string[]> => {
@@ -37,7 +36,6 @@ export const saveComparisonSelection = async (
 
 export const startComparison = async (formData: FormData): Promise<void> => {
   const scenario = String(formData.get("scenario") ?? "recorded");
-  if (!isScenarioName(scenario)) return;
   await startCurrentComparison(scenario);
   revalidatePath("/compare");
 };

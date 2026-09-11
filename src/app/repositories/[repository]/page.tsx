@@ -1,3 +1,5 @@
+import { ManualScenariosCard } from "./manual-scenarios-card";
+import { ScenariosCard } from "./scenarios-card";
 import Link from "next/link";
 import {
   Card,
@@ -101,6 +103,17 @@ export default async function RepositoryConfigPage({
           repository={repository}
         />
       </div>
+      <ScenariosCard
+        codeDirectory={settings().getCodeDirectory() ?? ""}
+        repository={repository}
+        sourceNames={settings()
+          .getScenarioConfig(repository)
+          .schemaSources.map(({ name }) => name)}
+      />
+      <ManualScenariosCard
+        repository={repository}
+        scenarios={settings().getScenarioConfig(repository).manualScenarios}
+      />
       <p className="mt-6 text-sm">
         <Link href="/compare" className="underline">
           Back to Compare

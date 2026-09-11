@@ -1,10 +1,11 @@
+import { type SchemaSource, contractSchema } from "./schema-sources";
 import type { EndpointCall } from "@/endpoints/endpoint-recordings";
 import { endpointPathPattern } from "@/endpoints/endpoint-recordings";
 import {
+  type JsonSchema,
   emptyValue,
   inferSchema,
   mergeSchemas,
-  type JsonSchema,
 } from "./json-schema";
 
 export interface ScenarioResponse {
@@ -13,6 +14,15 @@ export interface ScenarioResponse {
   endpoint: { method: string; origin: string; pathPattern: string };
   headers: Record<string, string>;
   status: number;
+}
+
+export interface ManualScenario {
+  name: string;
+  responses: (Omit<ScenarioResponse, "endpoint" | "body"> & {
+    method: string;
+    pathPattern: string;
+    body: string;
+  })[];
 }
 
 export interface Scenario {
@@ -38,7 +48,10 @@ const OMITTED_HEADERS = new Set([
 ]);
 
 /** Current Comparison's Base responses only; response credentials are never retained. */
-export const createScenarioCollection = () => {
+export const createScenarioCollection = (
+  schemaSources: SchemaSource[] = [],
+  manualScenarios: ManualScenario[] = []
+) => {
   const responses = new Map<string, ScenarioResponse>(),
     inferred = new Map<string, JsonSchema>();
   return {
@@ -92,7 +105,12 @@ export const createScenarioCollection = () => {
     scenarios: (): Scenario[] => {
       const recorded = [...responses.values()],
         schemas = recorded.flatMap(({ endpoint }) => {
-          const schema = inferred.get(JSON.stringify(endpoint));
+          const schema =
+            contractSchema(
+              schemaSources,
+              endpoint.method,
+              endpoint.pathPattern
+            ) ?? inferred.get(JSON.stringify(endpoint));
           return schema === undefined ? [] : [{ endpoint, schema }];
         }),
         empty = recorded.map((response) => {
@@ -108,6 +126,33 @@ export const createScenarioCollection = () => {
               };
         });
       return [
+        ...manualScenarios.map((manual) => ({
+          name: manual.name,
+          responses: recorded.map((response) => {
+            const edit = manual.responses.find((candidate) => {
+              const parts = candidate.pathPattern.split("/"),
+                actual = response.endpoint.pathPattern.split("/");
+              return (
+                candidate.method === response.endpoint.method &&
+                parts.length === actual.length &&
+                parts.every(
+                  (part, index) =>
+                    /^\{[^}]+\}$/u.test(part) || part === actual[index]
+                )
+              );
+            });
+            return edit === undefined
+              ? response
+              : {
+                  body: edit.body,
+                  delayMs: edit.delayMs,
+                  endpoint: response.endpoint,
+                  headers: edit.headers,
+                  status: edit.status,
+                };
+          }),
+          schemas,
+        })),
         { name: "recorded", responses: recorded, schemas },
         { name: "empty", responses: empty, schemas },
         {
@@ -122,9 +167,13 @@ export const createScenarioCollection = () => {
         },
         {
           name: "slow",
-          responses: recorded.map((response) =>
-            Object.assign({}, response, { delayMs: 3000 })
-          ),
+          responses: recorded.map(({ body, endpoint, headers, status }) => ({
+            body,
+            delayMs: 3000,
+            endpoint,
+            headers,
+            status,
+          })),
           schemas,
         },
       ];

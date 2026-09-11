@@ -1,4 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+/* Record samples in a defined order before checking the resulting Scenario. */
+/* oxlint-disable no-await-in-loop */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,7 +14,19 @@ const withComparison = async (
   check: (
     comparison: Awaited<ReturnType<typeof runComparison>>,
     origin: string
-  ) => Promise<void>
+  ) => Promise<void>,
+  schemaSources: { name: string; document: unknown }[] = [],
+  manualScenarios: {
+    name: string;
+    responses: {
+      method: string;
+      pathPattern: string;
+      status: number;
+      body: string;
+      headers: Record<string, string>;
+      delayMs: number;
+    }[];
+  }[] = []
 ) => {
   const api = createServer((request, response) => {
     if (request.url === "/download") {
@@ -61,10 +75,12 @@ const withComparison = async (
           useDotEnvLocal: false,
         },
         environment: {},
+        manualScenarios,
         organisation: "sauce-labs",
         readiness: { pollIntervalMs: 1, timeoutMs: 20 },
         repository: "web-app",
         runtime: "docker",
+        schemaSources,
         sessionId: "scenario-test",
         targetBranch: "feature/login",
         token: "fixture",
@@ -210,4 +226,251 @@ it("uses an observed type for empty values when an Endpoint returns mixed scalar
         ?.body
     ).toBe("0");
   });
+});
+
+it("uses a Schema Source's path contract across hosts and keeps inferred schemas for unmatched Endpoints", async () => {
+  await withComparison(
+    async (comparison, origin) => {
+      for (const path of ["/users/7", "/catalog/1"]) {
+        await fetch(
+          `${comparison.proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}${path}`)}`
+        );
+      }
+      const empty = comparison.scenarios().find(({ name }) => name === "empty");
+      expect(
+        empty?.responses.map(({ body }) => JSON.parse(String(body)))
+      ).toEqual([
+        { fullName: "", roles: [] },
+        { items: [], next: null },
+      ]);
+    },
+    [
+      {
+        document: {
+          info: { title: "Users", version: "1" },
+          openapi: "3.0.3",
+          paths: {
+            "/users/{userId}": {
+              get: {
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          properties: {
+                            fullName: { type: "string" },
+                            roles: { items: { type: "string" }, type: "array" },
+                          },
+                          type: "object",
+                        },
+                      },
+                    },
+                    description: "User",
+                  },
+                },
+              },
+            },
+          },
+          servers: [{ url: "https://different.example" }],
+        },
+        name: "Users contract",
+      },
+    ]
+  );
+});
+
+it("resolves local references in Swagger response contracts", async () => {
+  await withComparison(
+    async (comparison, origin) => {
+      await fetch(
+        `${comparison.proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/users/7`)}`
+      );
+      expect(
+        comparison.scenarios().find(({ name }) => name === "empty")
+          ?.responses[0]?.body
+      ).toBe('{"enabled":false}');
+    },
+    [
+      {
+        document: {
+          definitions: {
+            User: {
+              properties: { enabled: { type: "boolean" } },
+              type: "object",
+            },
+          },
+          info: { title: "Users", version: "1" },
+          paths: {
+            "/users/{id}": {
+              get: {
+                responses: {
+                  "200": {
+                    description: "User",
+                    schema: { $ref: "#/definitions/User" },
+                  },
+                },
+              },
+            },
+          },
+          swagger: "2.0",
+        },
+        name: "Swagger",
+      },
+    ]
+  );
+});
+
+it("replays a manual Scenario response identically through both Instances", async () => {
+  await withComparison(
+    async (comparison, origin) => {
+      const requestPath = `__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/users/7`)}`;
+      await fetch(`${comparison.proxy.urlFor("base")}${requestPath}`);
+      const scenario = comparison
+        .scenarios()
+        .find(({ name }) => name === "suspended");
+      expect(scenario).toBeDefined();
+      comparison.proxy.setScenario(scenario);
+      for (const role of ["base", "target"] as const) {
+        const response = await fetch(
+          `${comparison.proxy.urlFor(role)}${requestPath}`
+        );
+        expect({
+          body: await response.json(),
+          status: response.status,
+        }).toEqual({ body: { reason: "Suspended" }, status: 403 });
+      }
+    },
+    [],
+    [
+      {
+        name: "suspended",
+        responses: [
+          {
+            body: '{"reason":"Suspended"}',
+            delayMs: 0,
+            headers: { "content-type": "application/json" },
+            method: "GET",
+            pathPattern: "/users/{id}",
+            status: 403,
+          },
+        ],
+      },
+    ]
+  );
+});
+
+it("detects a Schema Source in the current Repository clone", async () => {
+  await withComparison(async (comparison) => {
+    writeFileSync(
+      join(comparison.base.clonePath, "openapi.yaml"),
+      "openapi: 3.0.3\ninfo: {title: Local, version: '1'}\npaths: {}\n"
+    );
+    expect(
+      (await comparison.detectSchemaSources()).map(({ name }) => name)
+    ).toContain(join(comparison.base.clonePath, "openapi.yaml"));
+  });
+});
+
+it("uses composed OpenAPI contracts and their enum values", async () => {
+  await withComparison(
+    async (comparison, origin) => {
+      await fetch(
+        `${comparison.proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/users/7`)}`
+      );
+      expect(
+        comparison.scenarios().find(({ name }) => name === "empty")
+          ?.responses[0]?.body
+      ).toBe('{"enabled":false,"state":"active"}');
+    },
+    [
+      {
+        document: {
+          components: {
+            schemas: {
+              User: {
+                properties: { enabled: { type: "boolean" } },
+                type: "object",
+              },
+            },
+          },
+          openapi: "3.0.3",
+          paths: {
+            "/users/{id}": {
+              get: {
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          allOf: [
+                            { $ref: "#/components/schemas/User" },
+                            {
+                              properties: {
+                                state: {
+                                  enum: ["active", "paused"],
+                                  type: "string",
+                                },
+                              },
+                              type: "object",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        name: "Composed",
+      },
+    ]
+  );
+});
+
+it("prefers a concrete contract path over a templated path for the same method", async () => {
+  await withComparison(
+    async (comparison, origin) => {
+      await fetch(
+        `${comparison.proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/users/me`)}`
+      );
+      expect(
+        comparison.scenarios().find(({ name }) => name === "empty")
+          ?.responses[0]?.body
+      ).toBe("false");
+    },
+    [
+      {
+        document: {
+          openapi: "3.0.3",
+          paths: {
+            "/users/me": {
+              get: {
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": { schema: { type: "boolean" } },
+                    },
+                  },
+                },
+              },
+            },
+            "/users/{id}": {
+              get: {
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": { schema: { type: "string" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        name: "Specific paths",
+      },
+    ]
+  );
 });
