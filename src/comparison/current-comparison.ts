@@ -113,10 +113,15 @@ const gather = async () => {
   if (token === undefined) {
     throw new EnvironmentFileError("No GitHub credential found.");
   }
-  const config = store.getRepositoryConfig(selection.repository);
-  if (config === undefined) {
-    throw new EnvironmentFileError(`Configure ${selection.repository} first.`);
-  }
+  // Each Instance discovers commands from its branch's manifest. Explicit
+  // Repository settings are overrides, not a prerequisite for that discovery.
+  const config = store.getRepositoryConfig(selection.repository) ?? {
+    crawl: DEFAULT_CRAWL_LIMITS,
+    installCommand: "",
+    pages: DEFAULT_MANUAL_PAGES,
+    port: 3000,
+    startCommand: "",
+  };
   validateInstanceEnvironment(loaded.environment, config.port);
   return {
     ...selection,

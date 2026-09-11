@@ -1,8 +1,17 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 
 /** Only podman is installed, and its machine is running. */
 const fake: Pick<RuntimeAdapter, "detect"> = {
@@ -14,22 +23,101 @@ const fake: Pick<RuntimeAdapter, "detect"> = {
     ),
 };
 vi.mock("@/container-runtime/runtime", () => ({ runtimeAdapter: fake }));
+const { runComparison } = vi.hoisted(() => ({
+  runComparison: vi.fn(() => new Promise(() => {})),
+}));
+vi.mock("./run-comparison", () => ({ runComparison }));
+vi.mock("@/github/github", () => ({
+  gitHubToken: async () => "test-token",
+}));
+process.env.SAUCE_CONTROL_KEYCHAIN = "memory";
 
 process.env.SAUCE_CONTROL_DATA_DIR = mkdtempSync(
   join(tmpdir(), "sauce-control-current-comparison-")
 );
 
-describe("canRunComparison", () => {
+describe("currentComparison", () => {
   let comparison: typeof import("./current-comparison"),
     settings: typeof import("@/settings/settings");
   beforeAll(async () => {
     comparison = await import("./current-comparison");
     settings = await import("@/settings/settings");
   });
+  afterEach(async () => {
+    await comparison.stopCurrentComparison();
+    runComparison.mockClear();
+  });
+  afterAll(() => {
+    settings.settings().close();
+    rmSync(process.env.SAUCE_CONTROL_DATA_DIR!, {
+      force: true,
+      recursive: true,
+    });
+  });
 
   it("uses the only installed runtime without a visit to Settings, and remembers it", async () => {
     expect(settings.settings().getContainerRuntime()).toBeUndefined();
     await expect(comparison.canRunComparison()).resolves.toBe(true);
     expect(settings.settings().getContainerRuntime()).toBe("podman");
+  });
+
+  it.each([false, true])(
+    "starts without a separate configuration save (Environment File: %s)",
+    async (withFile) => {
+      const store = settings.settings(),
+        file = join(process.env.SAUCE_CONTROL_DATA_DIR!, "test.env");
+      writeFileSync(file, "API_URL=https://example.test\n");
+      store.saveOrganisation("example");
+      store.saveComparisonSelection({
+        baseBranch: "main",
+        repository: "web-app",
+        targetBranch: "feature",
+      });
+      store.saveEnvironmentFiles("web-app", withFile ? [file] : []);
+
+      await comparison.startCurrentComparison();
+
+      expect(comparison.currentComparison()).not.toEqual({
+        kind: "failed",
+        message: "Configure web-app first.",
+      });
+      expect(runComparison).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          config: {
+            crawl: DEFAULT_CRAWL_LIMITS,
+            installCommand: "",
+            pages: { added: [], removed: [] },
+            port: 3000,
+            startCommand: "",
+          },
+          environment: withFile ? { API_URL: "https://example.test" } : {},
+          repository: "web-app",
+        })
+      );
+    }
+  );
+
+  it("uses explicitly saved Repository configuration", async () => {
+    const store = settings.settings(),
+      config = {
+        crawl: DEFAULT_CRAWL_LIMITS,
+        installCommand: "pnpm install",
+        pages: { added: [], removed: [] },
+        port: 4000,
+        startCommand: "pnpm run develop",
+      };
+    store.saveOrganisation("example");
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository: "configured-app",
+      targetBranch: "feature",
+    });
+    store.saveRepositoryConfig("configured-app", config);
+    await comparison.startCurrentComparison();
+    expect(runComparison).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ config })
+    );
   });
 });
