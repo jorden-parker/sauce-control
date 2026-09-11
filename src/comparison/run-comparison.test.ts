@@ -91,7 +91,10 @@ describe("running a Comparison", () => {
       ).toEqual(["main", "feature/login"]);
       expect(comparison.base.hostPort).not.toBe(comparison.target.hostPort);
       expect(comparison.proxy.urlFor("base")).toMatch(
-        /^http:\/\/127\.0\.0\.1:\d+\/base\/$/u
+        /^http:\/\/127\.0\.0\.1:\d+\/$/u
+      );
+      expect(comparison.proxy.urlFor("target")).not.toBe(
+        comparison.proxy.urlFor("base")
       );
       const response = await fetch(comparison.proxy.urlFor("target"));
       expect(response.status).toBe(502);

@@ -6,7 +6,10 @@ import { defineConfig } from "@playwright/test";
 const PORT = 3417,
   dataDirectory = mkdtempSync(join(tmpdir(), "sauce-control-e2e-"));
 
-/** Runs the app against the stub GitHub client and a throwaway data directory. */
+/**
+ * Runs the app against the stub GitHub client and a throwaway data directory. One worker:
+ * the app runs one Comparison at a time, so files that start one cannot share the server.
+ */
 export default defineConfig({
   testDir: "e2e",
   use: { baseURL: `http://127.0.0.1:${PORT}` },
@@ -24,4 +27,5 @@ export default defineConfig({
     stdout: "ignore",
     url: `http://127.0.0.1:${PORT}/settings`,
   },
+  workers: 1,
 });

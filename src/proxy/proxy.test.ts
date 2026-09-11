@@ -50,32 +50,24 @@ afterEach(async () => {
 });
 
 describe("routing through the Proxy", () => {
-  it("routes by path prefix to each Instance and strips the prefix", async () => {
+  it("serves each Instance on its own port at the root, so absolute links keep working", async () => {
     const proxy = await startAll();
+    expect(proxy.ports.base).not.toBe(proxy.ports.target);
+    expect(proxy.urlFor("base")).toBe(`http://127.0.0.1:${proxy.ports.base}/`);
     await expect(
-      (await fetch(`http://127.0.0.1:${proxy.port}/base/about?x=1`)).text()
+      (await fetch(`${proxy.urlFor("base")}about?x=1`)).text()
     ).resolves.toBe("base saw /about?x=1");
     await expect(
-      (await fetch(`http://127.0.0.1:${proxy.port}/target/`)).text()
-    ).resolves.toBe("target saw /");
+      (await fetch(`${proxy.urlFor("target")}_next/static/app.js`)).text()
+    ).resolves.toBe("target saw /_next/static/app.js");
   });
 
-  it("routes by header when the path carries no prefix", async () => {
-    const proxy = await startAll();
-    await expect(
-      (
-        await fetch(`http://127.0.0.1:${proxy.port}/api/items`, {
-          headers: { "x-sauce-control-instance": "target" },
-        })
-      ).text()
-    ).resolves.toBe("target saw /api/items");
-  });
-
-  it("answers 404 with guidance when neither path nor header names an Instance", async () => {
+  it("stops serving both ports on close", async () => {
     const proxy = await startAll(),
-      response = await fetch(`http://127.0.0.1:${proxy.port}/about`);
-    expect(response.status).toBe(404);
-    await expect(response.text()).resolves.toContain("/base/");
+      urls = [proxy.urlFor("base"), proxy.urlFor("target")];
+    open.pop();
+    await proxy.close();
+    await Promise.all(urls.map((url) => expect(fetch(url)).rejects.toThrow()));
   });
 });
 
@@ -93,12 +85,20 @@ describe("rewriting HTML", () => {
       response = await fetch(proxy.urlFor("base")),
       html = await response.text();
     expect(html).toMatch(
-      /<head><script data-sauce-control="determinism">[\s\S]+<\/script><style data-sauce-control="animations">[\s\S]+<\/style><title>App<\/title>/u
+      /<head><script data-sauce-control="determinism">[\s\S]+<\/script><style data-sauce-control="animations">[\s\S]+<\/style>[\s\S]*<title>App<\/title>/u
     );
     expect(html).toContain("animation: none !important");
     expect(html).toContain("transition: none !important");
     expect(response.headers.get("content-length")).toBe(
       String(Buffer.byteLength(html))
+    );
+  });
+
+  it("injects the sync script after the determinism shims", async () => {
+    const proxy = await startAll({ base: page }),
+      html = await (await fetch(proxy.urlFor("base"))).text();
+    expect(html).toMatch(
+      /<\/style><script data-sauce-control="sync">[\s\S]+parent\.postMessage[\s\S]+<\/script><title>/u
     );
   });
 

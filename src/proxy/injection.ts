@@ -1,3 +1,5 @@
+import { syncScriptSource } from "@/sync/sync-script";
+
 /** What the Proxy adds to every HTML page so both Instances behave identically. */
 export interface Injection {
   /** Epoch milliseconds every `Date.now()` and `new Date()` report. */
@@ -43,11 +45,12 @@ export const animationStylesheet = `
 }
 `;
 
-/** Inserts the script and stylesheet at the top of `<head>`, or before everything when there is none. */
+/** Inserts the scripts and stylesheet at the top of `<head>`, or before everything when there is none. */
 export const injectIntoHtml = (html: string, injection: Injection): string => {
   const block =
       `<script data-sauce-control="determinism">${determinismScript(injection)}</script>` +
-      `<style data-sauce-control="animations">${animationStylesheet}</style>`,
+      `<style data-sauce-control="animations">${animationStylesheet}</style>` +
+      `<script data-sauce-control="sync">${syncScriptSource()}</script>`,
     head = /<head[^>]*>/iu.exec(html);
   return head
     ? html.slice(0, head.index + head[0].length) +

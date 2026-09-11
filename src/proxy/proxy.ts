@@ -14,8 +14,7 @@ const DEFAULT_INJECTION: Injection = {
   randomSeed: 0x5a_ce_00_01,
 };
 
-export const INSTANCE_HEADER = "x-sauce-control-instance",
-  INSTANCE_ROLES = ["base", "target"] as const;
+export const INSTANCE_ROLES = ["base", "target"] as const;
 
 export type InstanceRole = (typeof INSTANCE_ROLES)[number];
 
@@ -25,36 +24,18 @@ export interface ProxyRequest {
   instances: Record<InstanceRole, { hostPort: number }>;
 }
 
-/** The tool's Proxy in front of both Instances. */
+/**
+ * The tool's Proxy in front of both Instances. Each Instance gets its own loopback port so
+ * absolute links and asset paths inside it keep working when it is embedded.
+ */
 export interface Proxy {
   close: () => Promise<void>;
-  port: number;
+  ports: Record<InstanceRole, number>;
   /** The URL a browser opens to reach one Instance. */
   urlFor: (role: InstanceRole) => string;
 }
 
-/** The Instance a request is for, and the path to forward, from its path prefix or header. */
-const route = (
-    request: IncomingMessage
-  ): { path: string; role: InstanceRole } | undefined => {
-    const url = request.url ?? "/",
-      prefixed = /^\/(base|target)(\/.*)?$/u.exec(url);
-    if (prefixed) {
-      return { path: prefixed[2] ?? "/", role: prefixed[1] as InstanceRole };
-    }
-    const header = request.headers[INSTANCE_HEADER];
-    if (header === "base" || header === "target") {
-      return { path: url, role: header };
-    }
-    return undefined;
-  },
-  notFound = (response: ServerResponse): void => {
-    response.writeHead(404, { "content-type": "text/plain" });
-    response.end(
-      `No Instance named. Open /base/ or /target/, or send ${INSTANCE_HEADER}: base|target.`
-    );
-  },
-  cookieHeader = (jar: CookieJar): { cookie?: string } => {
+const cookieHeader = (jar: CookieJar): { cookie?: string } => {
     const cookie = jar.header();
     return cookie === undefined ? {} : { cookie };
   },
@@ -120,39 +101,54 @@ const route = (
       response.end(`Instance unreachable: ${error.message}`);
     });
     request.pipe(upstream);
-  };
+  },
+  /** Listens on one free loopback port per Instance and forwards each to its own container. */
+  listen = (
+    handler: (request: IncomingMessage, response: ServerResponse) => void
+  ) =>
+    new Promise<Server>((resolve) => {
+      const server = createServer(handler);
+      server.listen(0, "127.0.0.1", () => resolve(server));
+    });
 
-/** Listens on a free loopback port and forwards to whichever Instance the request names. */
-export const startProxy = ({
+export const startProxy = async ({
   injection = DEFAULT_INJECTION,
   instances,
-}: ProxyRequest): Promise<Proxy> =>
-  new Promise((resolve) => {
-    const jar = createCookieJar(),
-      server: Server = createServer((request, response) => {
-        const target = route(request);
-        if (target === undefined) {
-          notFound(response);
-          return;
-        }
-        forward(
-          request,
-          response,
-          instances[target.role].hostPort,
-          target.path,
-          injection,
-          jar
-        );
-      });
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as AddressInfo;
-      resolve({
-        close: () =>
-          new Promise<void>((done, fail) => {
-            server.close((error) => (error ? fail(error) : done()));
-          }),
-        port,
-        urlFor: (role) => `http://127.0.0.1:${port}/${role}/`,
-      });
-    });
-  });
+}: ProxyRequest): Promise<Proxy> => {
+  const jar = createCookieJar(),
+    servers = await Promise.all(
+      INSTANCE_ROLES.map(async (role) => ({
+        role,
+        server: await listen((request, response) =>
+          forward(
+            request,
+            response,
+            instances[role].hostPort,
+            request.url ?? "/",
+            injection,
+            jar
+          )
+        ),
+      }))
+    ),
+    ports = Object.fromEntries(
+      servers.map(({ role, server }) => [
+        role,
+        (server.address() as AddressInfo).port,
+      ])
+    ) as Record<InstanceRole, number>;
+  return {
+    close: async () => {
+      await Promise.all(
+        servers.map(
+          ({ server }) =>
+            new Promise<void>((done, fail) => {
+              server.close((error) => (error ? fail(error) : done()));
+            })
+        )
+      );
+    },
+    ports,
+    urlFor: (role) => `http://127.0.0.1:${ports[role]}/`,
+  };
+};

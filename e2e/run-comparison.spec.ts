@@ -22,10 +22,14 @@ test("reviewer runs the saved Comparison and gets a Proxy link to each Instance,
 
   const status = page.getByTestId("comparison-status");
   await expect(status).toContainText("Both Instances of web-app are up.");
-  await expect(status.getByRole("link", { name: /\/base\/$/u })).toBeVisible();
-  await expect(
-    status.getByRole("link", { name: /\/target\/$/u })
-  ).toBeVisible();
+  const links = status.getByRole("link", {
+    name: /^http:\/\/127\.0\.0\.1:\d+\/$/u,
+  });
+  await expect(links).toHaveCount(2);
+  await expect(links.first()).not.toHaveAttribute(
+    "href",
+    (await links.last().getAttribute("href")) ?? ""
+  );
 
   await page.getByRole("button", { name: "Stop Comparison" }).click();
   await expect(

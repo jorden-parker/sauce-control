@@ -9,6 +9,7 @@ import { dataDirectory } from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
 import { nodeCommandRunner } from "@/shell/command-runner";
 import { type RunningComparison, runComparison } from "./run-comparison";
+import { runStubComparison } from "./stub-comparison";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
@@ -36,53 +37,42 @@ export const canRunComparison = (): boolean =>
 
 /** Everything the runner needs, gathered from settings, the keychain, and the GitHub credential. */
 const gather = async () => {
-    const store = settings(),
-      selection = store.getComparisonSelection(),
-      organisation = store.getOrganisation(),
-      runtime = store.getContainerRuntime(),
-      token = await gitHubToken();
-    if (selection === undefined) {
-      throw new Error("Save a Comparison first.");
-    }
-    if (useStub()) {
-      return { ...selection };
-    }
-    if (organisation === undefined) {
-      throw new Error("Save a GitHub Organisation first.");
-    }
-    if (runtime === undefined) {
-      throw new Error("Choose a Container Runtime in Settings first.");
-    }
-    if (token === undefined) {
-      throw new Error("No GitHub credential found.");
-    }
-    const config = store.getRepositoryConfig(selection.repository);
-    if (config === undefined) {
-      throw new Error(`Configure ${selection.repository} first.`);
-    }
-    return {
-      ...selection,
-      codeDirectory: store.getCodeDirectory(),
-      config,
-      environment: loadEnvironment(keychain, selection.repository),
-      organisation,
-      readiness: READINESS,
-      runtime,
-      sessionId: currentSessionId,
-      token,
-    };
-  },
-  stubRun = (): Promise<RunningComparison> =>
-    Promise.resolve({
-      base: { branch: "", clonePath: "", containerId: "", hostPort: 0 },
-      proxy: {
-        close: () => Promise.resolve(),
-        port: 0,
-        urlFor: (role) => `http://127.0.0.1:0/${role}/`,
-      },
-      stop: () => Promise.resolve(),
-      target: { branch: "", clonePath: "", containerId: "", hostPort: 0 },
-    });
+  const store = settings(),
+    selection = store.getComparisonSelection(),
+    organisation = store.getOrganisation(),
+    runtime = store.getContainerRuntime(),
+    token = await gitHubToken();
+  if (selection === undefined) {
+    throw new Error("Save a Comparison first.");
+  }
+  if (useStub()) {
+    return { ...selection };
+  }
+  if (organisation === undefined) {
+    throw new Error("Save a GitHub Organisation first.");
+  }
+  if (runtime === undefined) {
+    throw new Error("Choose a Container Runtime in Settings first.");
+  }
+  if (token === undefined) {
+    throw new Error("No GitHub credential found.");
+  }
+  const config = store.getRepositoryConfig(selection.repository);
+  if (config === undefined) {
+    throw new Error(`Configure ${selection.repository} first.`);
+  }
+  return {
+    ...selection,
+    codeDirectory: store.getCodeDirectory(),
+    config,
+    environment: loadEnvironment(keychain, selection.repository),
+    organisation,
+    readiness: READINESS,
+    runtime,
+    sessionId: currentSessionId,
+    token,
+  };
+};
 
 /** Starts the saved Comparison in the background; the status reports progress. */
 export const startCurrentComparison = async (): Promise<void> => {
@@ -100,7 +90,7 @@ export const startCurrentComparison = async (): Promise<void> => {
             { git: nodeCommandRunner, runtime: runtimeAdapter },
             { ...request, workDirectory }
           )
-        : stubRun();
+        : runStubComparison();
     run
       .then((comparison) => {
         running = comparison;

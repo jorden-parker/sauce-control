@@ -14,6 +14,7 @@ import { gitHubClient } from "@/github/github";
 import { settings } from "@/settings/settings";
 import { ComparisonForm } from "./comparison-form";
 import { ComparisonStatusPanel } from "./comparison-status";
+import { EmbeddedInstances } from "./embedded-instances";
 
 export const dynamic = "force-dynamic";
 
@@ -33,53 +34,62 @@ export default async function ComparePage() {
       organisation !== undefined && client !== undefined
         ? await client.listRepositories(organisation)
         : [],
-    saved = settings().getComparisonSelection();
+    saved = settings().getComparisonSelection(),
+    status = currentComparison();
 
   return (
-    <main className="mx-auto w-full max-w-lg p-8">
+    <main className="mx-auto w-full max-w-6xl p-8">
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">Compare</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>Choose what to compare</CardTitle>
-          <CardDescription>
-            A Repository from{" "}
-            <span className="font-mono">
-              {organisation ?? "your Organisation"}
-            </span>
-            , the Target Branch under review, and the Base Branch to compare
-            against.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {organisation === undefined ? (
-            <Blocker>Save a GitHub Organisation first.</Blocker>
-          ) : client === undefined ? (
-            <Blocker>
-              No GitHub credential found. Log in with{" "}
-              <span className="font-mono">gh</span> or paste a personal access
-              token.
-            </Blocker>
-          ) : (
-            <ComparisonForm repositories={repositories} saved={saved} />
-          )}
-        </CardContent>
-      </Card>
-      {saved === undefined ? null : (
-        <Card className="mt-6">
+      <div className="max-w-lg">
+        <Card>
           <CardHeader>
-            <CardTitle>Run</CardTitle>
+            <CardTitle>Choose what to compare</CardTitle>
             <CardDescription>
-              Builds and starts both branches, each reachable through the Proxy.
+              A Repository from{" "}
+              <span className="font-mono">
+                {organisation ?? "your Organisation"}
+              </span>
+              , the Target Branch under review, and the Base Branch to compare
+              against.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ComparisonStatusPanel
-              canRun={canRunComparison()}
-              status={currentComparison()}
-            />
+            {organisation === undefined ? (
+              <Blocker>Save a GitHub Organisation first.</Blocker>
+            ) : client === undefined ? (
+              <Blocker>
+                No GitHub credential found. Log in with{" "}
+                <span className="font-mono">gh</span> or paste a personal access
+                token.
+              </Blocker>
+            ) : (
+              <ComparisonForm repositories={repositories} saved={saved} />
+            )}
           </CardContent>
         </Card>
-      )}
+        {saved === undefined ? null : (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Run</CardTitle>
+              <CardDescription>
+                Builds and starts both branches, each reachable through the
+                Proxy.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ComparisonStatusPanel
+                canRun={canRunComparison()}
+                status={status}
+              />
+            </CardContent>
+          </Card>
+        )}
+      </div>
+      {status.kind === "running" ? (
+        <div className="mt-8">
+          <EmbeddedInstances urls={status.urls} />
+        </div>
+      ) : null}
     </main>
   );
 }
