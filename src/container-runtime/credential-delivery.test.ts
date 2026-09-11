@@ -179,6 +179,59 @@ describe.each(["docker", "podman"] as const)(
         ),
       });
     });
+    it.each([
+      [
+        "installation-failed:E401:present:1",
+        "NODE_AUTH_TOKEN reached the installer",
+      ],
+      ["installation-failed:EACCES:present:243", "file permissions"],
+      [
+        "installation-failed:unknown:absent:127",
+        "could not find a required command",
+      ],
+      [
+        "installation-failed:private-token:present:1",
+        "Could not securely start",
+      ],
+      ["installation-failed:E401:private-token:1", "Could not securely start"],
+    ])(
+      "validates the failure report before displaying it: %s",
+      async (result, expected) => {
+        const adapter = createCliRuntimeAdapter(
+            {
+              run: async (_name, args, options) => ({
+                stdout:
+                  args[0] === "exec"
+                    ? JSON.parse(options.input!).probe
+                      ? "ready"
+                      : `installing\n${result}`
+                    : args[0] === "run"
+                      ? "id"
+                      : args[0] === "port"
+                        ? "127.0.0.1:4000"
+                        : "[]",
+              }),
+            },
+            { platform: "darwin" }
+          ),
+          failure = await adapter
+            .runContainer(runtime, {
+              development: {
+                installCommand: "npm ci",
+                startCommand: "npm run dev",
+              },
+              environment: { NODE_AUTH_TOKEN: "private-token" },
+              image: "test",
+              labels: {},
+              port: 3000,
+            })
+            .catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(ComparisonStartError);
+        expect(String(failure)).toContain(expected);
+        expect(String(failure)).not.toContain("private-token");
+        expect((failure as Error).cause).toBeUndefined();
+      }
+    );
     it("uses only stdin, reinjects its snapshot on restart, and forgets it on removal", async () => {
       const calls: { args: string[]; options: RunOptions }[] = [],
         adapter = createCliRuntimeAdapter(

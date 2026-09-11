@@ -183,3 +183,136 @@ describe.each(["docker", "podman"] as const)(
     );
   }
 );
+
+// The registry is inside the disposable container. No real credential or
+// External package registry is used, but npm's HTTP authentication is real.
+describe.each(["docker", "podman"] as const)(
+  "%s private registry authentication",
+  (runtime) => {
+    it.for([false, true])(
+      "auth configuration present: %s",
+      { timeout: 180_000 },
+      async (configured, { skip }) => {
+        const adapter = createCliRuntimeAdapter(nodeCommandRunner, {
+            platform: process.platform,
+          }),
+          status = await adapter.detect(runtime);
+        if (!status.installed || !status.running) {
+          return skip();
+        }
+        const root = mkdtempSync(join(tmpdir(), "registry-auth-")),
+          fixture = join(root, "fixture"),
+          sessionId = randomUUID(),
+          token = `synthetic-${randomUUID()}`;
+        mkdirSync(fixture);
+        const file = join(root, "credentials.env");
+        writeFileSync(file, `export NODE_AUTH_TOKEN=${token}\n`);
+        const loaded = await readEnvironmentFiles([file]);
+        writeFileSync(
+          join(fixture, "package.json"),
+          JSON.stringify({
+            name: "fixture",
+            scripts: { dev: "node server.cjs" },
+          })
+        );
+        if (configured) {
+          writeFileSync(
+            join(fixture, ".npmrc"),
+            "//127.0.0.1:4873/:_authToken=${NODE_AUTH_TOKEN}\n"
+          );
+        }
+        writeFileSync(
+          join(fixture, "install.cjs"),
+          `
+const http = require('node:http'), {spawn} = require('node:child_process');
+const server = http.createServer((request,response) => {
+  response.setHeader('Content-Type','application/json');
+  if (request.headers.authorization !== 'Bearer ' + process.env.NODE_AUTH_TOKEN) {
+    response.writeHead(401); response.end(JSON.stringify({error:'authentication required'})); return;
+  }
+  response.end(JSON.stringify({name:'private-fixture','dist-tags':{latest:'1.0.0'},versions:{'1.0.0':{name:'private-fixture',version:'1.0.0'}}}));
+});
+server.listen(4873,'127.0.0.1',() => {
+  const child=spawn('npm',['view','private-fixture','version','--registry=http://127.0.0.1:4873','--fetch-retries=0'],{stdio:'inherit'});
+  child.on('error',()=>{process.exitCode=1;server.close()});
+  child.on('close',code=>{process.exitCode=code ?? 1;server.close()});
+});
+`
+        );
+        writeFileSync(
+          join(fixture, "server.cjs"),
+          `require('node:http').createServer((q,r)=>r.end('ready')).listen(3000,'0.0.0.0')`
+        );
+        let id: string | undefined;
+        try {
+          const running = runInstance(
+            {
+              git: {
+                run: async (_command, args) => {
+                  cpSync(fixture, args.at(-1)!, { recursive: true });
+                  return { stdout: "" };
+                },
+              },
+              runtime: adapter,
+            },
+            {
+              branch: "main",
+              config: {
+                crawl: DEFAULT_CRAWL_LIMITS,
+                installCommand: "node install.cjs",
+                pages: { added: [], removed: [] },
+                port: 3000,
+                startCommand: "node server.cjs",
+              },
+              environment: loaded.environment,
+              environmentFiles: loaded.resolvedPaths,
+              organisation: "fixture",
+              readiness: { pollIntervalMs: 100, timeoutMs: 15_000 },
+              repository: "registry-auth",
+              runtime,
+              sessionId,
+              token: "unused",
+              workDirectory: join(root, "clones"),
+            }
+          );
+          if (configured) {
+            const instance = await running;
+            id = instance.containerId;
+            expect(
+              await (
+                await fetch(`http://127.0.0.1:${instance.hostPort}`)
+              ).text()
+            ).toBe("ready");
+          } else {
+            const failure = await running.then(
+              (instance) => {
+                id = instance.containerId;
+                return;
+              },
+              (error: unknown) => error
+            );
+            expect(failure).toBeInstanceOf(Error);
+            expect(String(failure)).toContain("E401");
+            expect(String(failure)).toContain(
+              "NODE_AUTH_TOKEN reached the installer"
+            );
+            expect(String(failure)).toContain(".npmrc");
+            expect(String(failure)).not.toContain(token);
+            expect(String(failure)).not.toContain(
+              Buffer.from(token).toString("base64")
+            );
+          }
+        } finally {
+          if (id) {
+            await adapter.removeContainers(runtime, [id]);
+          }
+          await adapter.removeImages(
+            runtime,
+            `sauce-control.session=${sessionId}`
+          );
+          rmSync(root, { force: true, recursive: true });
+        }
+      }
+    );
+  }
+);

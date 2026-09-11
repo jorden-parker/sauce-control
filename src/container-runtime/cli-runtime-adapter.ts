@@ -6,6 +6,7 @@ import type {
   RuntimeAdapter,
 } from "./runtime-adapter";
 import { DEVELOPMENT_TRANSPORT } from "@/instance/development-launcher";
+import { installationFailureMessage } from "@/instance/installation-diagnostics";
 import { randomUUID } from "node:crypto";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 import { startPlan } from "./start-command";
@@ -103,6 +104,7 @@ export const createCliRuntimeAdapter = (
       request: RunRequest,
       restarting = false
     ) => {
+      let installationFailure: string | undefined;
       try {
         const command = [
             "exec",
@@ -156,6 +158,10 @@ export const createCliRuntimeAdapter = (
             timeoutMs: BUILD_TIMEOUT_MS,
           }),
           result = response.stdout.split("\n").at(-1);
+        installationFailure = installationFailureMessage(result ?? "");
+        if (installationFailure) {
+          throw new Error("installation-failed");
+        }
         if (result === "installation-failed") {
           throw new Error("installation-failed");
         }
@@ -168,7 +174,8 @@ export const createCliRuntimeAdapter = (
         // oxlint-disable-next-line preserve-caught-error -- Causes can contain credentials in runtime output.
         throw new ComparisonStartError(
           error instanceof Error && error.message === "installation-failed"
-            ? "Dependency installation failed. Open Compare → Configure repository and check the Dependency installation command. Check NODE_AUTH_TOKEN in Environment Files on Compare or Environment variables in Repository Config. Raw logs are suppressed to protect credentials."
+            ? (installationFailure ??
+                "Dependency installation failed. Open Compare → Configure repository and check the Dependency installation command. Check NODE_AUTH_TOKEN in Environment Files on Compare or Environment variables in Repository Config. Raw logs are suppressed to protect credentials.")
             : `Could not securely start the development server with ${name}. Check Container Runtime in Settings for interactive exec support, and Development server command in Compare → Configure repository. Raw logs are suppressed to protect credentials.`
         );
       }

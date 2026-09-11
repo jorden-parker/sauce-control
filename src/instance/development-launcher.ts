@@ -1,3 +1,5 @@
+import { INSTALLATION_ERROR_HINTS } from "./installation-diagnostics";
+
 /** Trusted PID 1. Input stays in memory; child output never reaches runtime logs. */
 export const DEVELOPMENT_LAUNCHER = String.raw`
 const net = require('node:net');
@@ -7,8 +9,9 @@ const socketPath = '/tmp/sauce-control.sock';
 let child, busy = false, launched = false;
 try { fs.unlinkSync(socketPath); } catch {}
 const base = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/home/node', NODE_ENV: 'development' };
-const execute = (command, environment) => spawn('/bin/sh', ['-c', command], {
-  cwd: '/app', env: environment, stdio: 'ignore', detached: true
+const errorCodes = ${JSON.stringify([...Object.keys(INSTALLATION_ERROR_HINTS).filter((code) => code !== "ELIFECYCLE"), "ELIFECYCLE"])};
+const execute = (command, environment, diagnose = false) => spawn('/bin/sh', ['-c', command], {
+  cwd: '/app', env: environment, stdio: diagnose ? ['ignore', 'pipe', 'pipe'] : 'ignore', detached: true
 });
 const server = net.createServer({ allowHalfOpen: true }, socket => {
   let text = '';
@@ -28,13 +31,30 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
         socket.write('installing\n');
         const installEnv = { ...base };
         if (payload.environment.NODE_AUTH_TOKEN !== undefined) installEnv.NODE_AUTH_TOKEN = payload.environment.NODE_AUTH_TOKEN;
-        child = execute(payload.installCommand, installEnv);
-        const ok = await new Promise(resolve => {
-          child.once('error', () => resolve(false));
-          child.once('exit', code => resolve(code === 0));
+        const tokenStatus = installEnv.NODE_AUTH_TOKEN === undefined ? 'absent' : installEnv.NODE_AUTH_TOKEN.length ? 'present' : 'empty';
+        child = execute(payload.installCommand, installEnv, true);
+        let errorIndex = errorCodes.length;
+        // Drain both streams but retain at most 256 characters per stream.
+        // Only allowlisted codes survive; raw chunks are never forwarded or saved.
+        for (const stream of [child.stdout, child.stderr]) {
+          let tail = '';
+          stream.setEncoding('utf8');
+          stream.on('data', chunk => {
+            const text = tail + chunk;
+            for (let index = 0; index < errorIndex; index++) {
+              if (new RegExp('\\b' + errorCodes[index] + '\\b').test(text)) { errorIndex = index; break; }
+            }
+            tail = text.slice(-256);
+          });
+          stream.on('end', () => { tail = ''; });
+        }
+        const status = await new Promise(resolve => {
+          child.once('error', () => resolve('spawn'));
+          // close waits for stdout and stderr to drain, including the last error.
+          child.once('close', (code, signal) => resolve(signal ? 'signal' : code));
         });
         delete installEnv.NODE_AUTH_TOKEN;
-        if (!ok) { busy = false; socket.end('installation-failed'); return; }
+        if (status !== 0) { busy = false; socket.end('installation-failed:' + (errorCodes[errorIndex] || 'unknown') + ':' + tokenStatus + ':' + status); return; }
       }
       socket.write('starting\n');
       const environment = { ...base, ...payload.environment, NODE_ENV: 'development', PORT: String(payload.port) };
