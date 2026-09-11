@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local data
 /.sauce-control/
+
+# playwright
+/test-results/
+/playwright-report/
+/.next-e2e/

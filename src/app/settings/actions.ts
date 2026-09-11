@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { runtimeAdapter } from "@/container-runtime/runtime";
 import { isRuntimeName } from "@/container-runtime/runtime-status";
 import { startRuntime } from "@/container-runtime/start-runtime";
+import { GITHUB_TOKEN_SECRET } from "@/github/github-token";
+import { keychain } from "@/keychain";
 import { settings } from "@/settings/settings";
 
 export const saveOrganisation = async (formData: FormData): Promise<void> => {
@@ -12,6 +14,16 @@ export const saveOrganisation = async (formData: FormData): Promise<void> => {
     return;
   }
   settings().saveOrganisation(organisation);
+  revalidatePath("/settings");
+};
+
+/** Stores a pasted personal access token in the OS keychain only. */
+export const saveGitHubToken = async (formData: FormData): Promise<void> => {
+  const token = String(formData.get("githubToken") ?? "").trim();
+  if (token === "") {
+    return;
+  }
+  keychain.setSecret(GITHUB_TOKEN_SECRET, token);
   revalidatePath("/settings");
 };
 

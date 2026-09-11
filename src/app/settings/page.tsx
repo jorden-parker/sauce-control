@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,11 +14,14 @@ import { runtimeAdapter } from "@/container-runtime/runtime";
 import { settings } from "@/settings/settings";
 import { saveOrganisation } from "./actions";
 import { ContainerRuntimeCard } from "./container-runtime-card";
+import { GitHubAccessCard } from "./github-access-card";
+import { gitHubTokenSource } from "@/github/github";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const organisation = settings().getOrganisation(),
+    tokenSource = await gitHubTokenSource(),
     runtimeChoice = await loadRuntimeChoice(
       runtimeAdapter,
       settings().getContainerRuntime()
@@ -60,8 +64,16 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
       <div className="mt-6">
+        <GitHubAccessCard source={tokenSource} />
+      </div>
+      <div className="mt-6">
         <ContainerRuntimeCard choice={runtimeChoice} />
       </div>
+      <p className="mt-6 text-sm">
+        <Link href="/compare" className="underline">
+          Choose what to compare
+        </Link>
+      </p>
     </main>
   );
 }
