@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 (Scaffold app with Geist theme)
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Token comes from `gh auth token` when available, otherwise from a personal access token pasted in settings and stored in the keychain, never in SQLite or logs
 - [ ] Repository ComboBox searches the Organisation's repositories
