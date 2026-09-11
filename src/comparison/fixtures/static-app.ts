@@ -82,6 +82,7 @@ const FIXTURE_ROOT = join(import.meta.dirname, "static-app"),
           running: true,
           version: "29.7.2",
         }),
+      inspectContainers: () => Promise.resolve([]),
       isListening: () => Promise.resolve(true),
       listContainers: () => Promise.resolve([]),
       removeContainers: async (_name, ids) => {
@@ -116,6 +117,8 @@ const FIXTURE_ROOT = join(import.meta.dirname, "static-app"),
         };
       },
       start: () => Promise.resolve(),
+      startContainers: () => Promise.resolve(),
+      stopContainers: () => Promise.resolve(),
     };
   };
 

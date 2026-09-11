@@ -20,7 +20,7 @@ export type InstanceRole = (typeof INSTANCE_ROLES)[number];
 
 export interface ProxyRequest {
   injection?: Injection;
-  /** Loopback host port of each running Instance. */
+  /** Loopback host port of each running Instance; read per request, so updating it reroutes. */
   instances: Record<InstanceRole, { hostPort: number }>;
 }
 

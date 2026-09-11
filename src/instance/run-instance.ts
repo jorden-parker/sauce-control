@@ -4,12 +4,19 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
 import type { RuntimeName } from "@/container-runtime/runtime-status";
 import type { RepositoryConfig } from "@/settings/settings-store";
+import type { GitHubRequestLog } from "@/github/request-log";
 import type { CommandRunner } from "@/shell/command-runner";
 import { cloneBranch } from "./clone-branch";
 import { generateDockerfile } from "./dockerfile";
+import {
+  APP_LABEL,
+  BRANCH_LABEL,
+  REPOSITORY_LABEL,
+  SESSION_LABEL,
+  appLabelValue,
+} from "./labels";
 
-export const BRANCH_LABEL = "sauce-control.branch",
-  SESSION_LABEL = "sauce-control.session";
+export { BRANCH_LABEL, SESSION_LABEL } from "./labels";
 
 export interface InstanceRequest {
   branch: string;
@@ -36,6 +43,8 @@ export interface Instance {
 
 export interface InstanceDependencies {
   git: CommandRunner;
+  /** Where the clone's GitHub transfer is recorded; omitted in tests that never reach GitHub. */
+  requestLog?: GitHubRequestLog;
   runtime: RuntimeAdapter;
 }
 
@@ -82,28 +91,33 @@ const slug = (text: string): string =>
 
 /** Clone, build, and start one branch as an Instance; resolves once it listens on its port. */
 export const runInstance = async (
-  { git, runtime }: InstanceDependencies,
+  { git, requestLog, runtime }: InstanceDependencies,
   request: InstanceRequest
 ): Promise<Instance> => {
   const { branch, config, environment, repository, sessionId } = request,
     clonePath = join(request.workDirectory, slug(branch)),
-    tag = `sauce-control/${slug(repository)}-${slug(branch)}:${slug(sessionId)}`;
+    tag = `sauce-control/${slug(repository)}-${slug(branch)}:${slug(sessionId)}`,
+    ownership = { [APP_LABEL]: appLabelValue(), [SESSION_LABEL]: sessionId };
 
   await assertRunning(runtime, request.runtime);
-  await cloneBranch(git, {
-    branch,
-    codeDirectory: request.codeDirectory,
-    destination: clonePath,
-    organisation: request.organisation,
-    repository,
-    token: request.token,
-  });
+  await cloneBranch(
+    git,
+    {
+      branch,
+      codeDirectory: request.codeDirectory,
+      destination: clonePath,
+      organisation: request.organisation,
+      repository,
+      token: request.token,
+    },
+    requestLog
+  );
   await runtime.buildImage(request.runtime, {
     context: clonePath,
     dockerfile: existsSync(join(clonePath, "Dockerfile"))
       ? undefined
       : generateDockerfile(config),
-    labels: { [SESSION_LABEL]: sessionId },
+    labels: ownership,
     tag,
   });
   const { containerId, hostPort } = await runtime.runContainer(
@@ -111,7 +125,11 @@ export const runInstance = async (
     {
       environment,
       image: tag,
-      labels: { [BRANCH_LABEL]: branch, [SESSION_LABEL]: sessionId },
+      labels: {
+        ...ownership,
+        [BRANCH_LABEL]: branch,
+        [REPOSITORY_LABEL]: repository,
+      },
       port: config.port,
     }
   );

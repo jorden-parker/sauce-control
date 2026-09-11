@@ -31,6 +31,7 @@ const fakeRuntime = ({
             running,
             version: "29.7.2",
           }),
+        inspectContainers: () => Promise.resolve([]),
         isListening: () => Promise.resolve(listening),
         listContainers: () => Promise.resolve([]),
         removeContainers: (_name, ids) => {
@@ -43,6 +44,8 @@ const fakeRuntime = ({
           return Promise.resolve({ containerId: "abc123", hostPort: 49_152 });
         },
         start: () => Promise.resolve(),
+        startContainers: () => Promise.resolve(),
+        stopContainers: () => Promise.resolve(),
       };
     return { adapter, builds, removed, runs };
   },
@@ -97,7 +100,10 @@ describe("running one Instance", () => {
       {
         context: join(instance.clonePath),
         dockerfile: undefined,
-        labels: { "sauce-control.session": "session-1" },
+        labels: {
+          "sauce-control.app": "sauce-control",
+          "sauce-control.session": "session-1",
+        },
         tag: "sauce-control/web-app-feature-login:session-1",
       },
     ]);
@@ -122,7 +128,7 @@ describe("running one Instance", () => {
     );
   });
 
-  it("labels the container with the session id and passes the port and environment", async () => {
+  it("labels the container with the app, session, Repository, and branch and passes the port and environment", async () => {
     const runtime = fakeRuntime(),
       git = fakeGit({ Dockerfile: "FROM scratch\n" });
 
@@ -133,7 +139,9 @@ describe("running one Instance", () => {
         environment: { API_URL: "https://api.example.test" },
         image: "sauce-control/web-app-feature-login:session-1",
         labels: {
+          "sauce-control.app": "sauce-control",
           "sauce-control.branch": "feature/login",
+          "sauce-control.repository": "web-app",
           "sauce-control.session": "session-1",
         },
         port: 3000,

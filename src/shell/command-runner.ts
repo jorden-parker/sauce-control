@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile } from "node:child_process";
 
 export interface RunOptions {
   cwd?: string;
@@ -18,7 +18,9 @@ export interface CommandRunner {
   ) => Promise<{ stdout: string }>;
 }
 
-const MAX_BUFFER = 64 * 1024 * 1024;
+const MAX_BUFFER = 64 * 1024 * 1024,
+  /** Every child still running, so exit cleanup can kill a half-finished clone or build. */
+  liveChildren = new Set<ChildProcess>();
 
 /** Real shell: `execFile` with a kill-on-timeout. */
 export const nodeCommandRunner: CommandRunner = {
@@ -34,6 +36,7 @@ export const nodeCommandRunner: CommandRunner = {
           timeout: timeoutMs,
         },
         (error, stdout) => {
+          liveChildren.delete(child);
           if (error) {
             reject(error);
           } else {
@@ -41,6 +44,17 @@ export const nodeCommandRunner: CommandRunner = {
           }
         }
       );
+      liveChildren.add(child);
       child.stdin?.end(input ?? "");
     }),
+};
+
+/** Kills every command still running and returns how many there were. */
+export const killLiveCommands = (): number => {
+  const count = liveChildren.size;
+  for (const child of liveChildren) {
+    child.kill("SIGKILL");
+  }
+  liveChildren.clear();
+  return count;
 };

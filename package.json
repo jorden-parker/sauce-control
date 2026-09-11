@@ -7,9 +7,9 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run",
-    "dev": "next dev -H 127.0.0.1",
+    "dev": "NEXT_MANUAL_SIG_HANDLE=true NEXT_EXIT_TIMEOUT_MS=90000 next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start -H 127.0.0.1",
+    "start": "NEXT_MANUAL_SIG_HANDLE=true NEXT_EXIT_TIMEOUT_MS=90000 next start -H 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test"
   },

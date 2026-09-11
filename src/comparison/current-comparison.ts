@@ -7,6 +7,7 @@ import { keychain } from "@/keychain";
 import { loadEnvironment } from "@/repository-config/environment";
 import { dataDirectory } from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
+import { gitHubRequestLog } from "@/github/request-log";
 import { nodeCommandRunner } from "@/shell/command-runner";
 import { type Discovery, discoverPages } from "./discover-pages";
 import { type RunningComparison, runComparison } from "./run-comparison";
@@ -104,7 +105,11 @@ export const startCurrentComparison = async (): Promise<void> => {
     const run =
       "config" in request
         ? runComparison(
-            { git: nodeCommandRunner, runtime: runtimeAdapter },
+            {
+              git: nodeCommandRunner,
+              requestLog: gitHubRequestLog(),
+              runtime: runtimeAdapter,
+            },
             { ...request, workDirectory }
           )
         : runStubComparison();
@@ -135,6 +140,18 @@ export const startCurrentComparison = async (): Promise<void> => {
       });
   } catch (error) {
     status = { kind: "failed", message: (error as Error).message };
+  }
+};
+
+/** Points the Proxy at a restarted Instance's new host port, when the container belongs to this Comparison. */
+export const updateInstancePort = (
+  containerId: string,
+  hostPort: number
+): void => {
+  for (const instance of [running?.base, running?.target]) {
+    if (instance?.containerId === containerId) {
+      instance.hostPort = hostPort;
+    }
   }
 };
 

@@ -24,7 +24,7 @@ const readManifest = async (
   organisation: string,
   repository: string
 ): Promise<PackageManifest> => {
-  const client = await gitHubClient();
+  const client = await gitHubClient("repository-config");
   if (client === undefined) {
     return {};
   }

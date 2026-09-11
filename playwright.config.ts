@@ -16,6 +16,10 @@ export default defineConfig({
   webServer: {
     command: `pnpm next dev -H 127.0.0.1 -p ${PORT}`,
     env: {
+      // Instance cleanup owns the exit; see src/instance/session-bootstrap.ts.
+      NEXT_EXIT_TIMEOUT_MS: "90000",
+      NEXT_MANUAL_SIG_HANDLE: "true",
+      SAUCE_CONTROL_APP_LABEL: "sauce-control-e2e",
       SAUCE_CONTROL_COMPARISON: "stub",
       SAUCE_CONTROL_DATA_DIR: dataDirectory,
       SAUCE_CONTROL_DIST_DIR: ".next-e2e",

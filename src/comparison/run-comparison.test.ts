@@ -26,6 +26,7 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
             running: true,
             version: "29.7.2",
           }),
+        inspectContainers: () => Promise.resolve([]),
         isListening: (_name, containerId) =>
           containerId === failing
             ? Promise.resolve(false)
@@ -49,6 +50,8 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
           };
         },
         start: () => Promise.resolve(),
+        startContainers: () => Promise.resolve(),
+        stopContainers: () => Promise.resolve(),
       };
     return { adapter, removed, runs };
   },

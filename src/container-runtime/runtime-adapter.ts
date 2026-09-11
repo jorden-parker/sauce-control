@@ -17,6 +17,17 @@ export interface RunRequest {
   port: number;
 }
 
+/** What `inspect` reports about one container, trimmed to what the tool shows and cleans. */
+export interface ContainerDetails {
+  containerId: string;
+  /** ISO timestamp of creation. */
+  createdAt: string;
+  /** Loopback host port published to `port`, when the container is running. */
+  hostPort: number | undefined;
+  labels: Record<string, string>;
+  state: "running" | "stopped";
+}
+
 export interface RunningContainer {
   containerId: string;
   /** Loopback host port published to the container port. */
@@ -35,6 +46,11 @@ export interface RuntimeAdapter {
     containerId: string,
     port: number
   ) => Promise<boolean>;
+  /** Details of the containers; missing ids are skipped. */
+  inspectContainers: (
+    name: RuntimeName,
+    containerIds: string[]
+  ) => Promise<ContainerDetails[]>;
   /** Ids of containers, running or not, carrying the label (`key` or `key=value`). */
   listContainers: (name: RuntimeName, label: string) => Promise<string[]>;
   /** Removes every unused image carrying the label (`key` or `key=value`). */
@@ -49,6 +65,10 @@ export interface RuntimeAdapter {
     name: RuntimeName,
     request: RunRequest
   ) => Promise<RunningContainer>;
+  /** Starts stopped containers again; they keep their image, labels, and id. */
+  startContainers: (name: RuntimeName, containerIds: string[]) => Promise<void>;
+  /** Stops running containers without removing them. */
+  stopContainers: (name: RuntimeName, containerIds: string[]) => Promise<void>;
   /** Kick off the runtime's VM/daemon (`podman machine start`, Docker Desktop). Resolves when the command returns, not when ready. */
   start: (name: RuntimeName) => Promise<void>;
 }

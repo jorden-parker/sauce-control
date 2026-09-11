@@ -11,7 +11,7 @@ import { settings } from "@/settings/settings";
 /** Branch names of one Repository in the saved Organisation, for the Target Branch ComboBox. */
 export const listBranches = async (repository: string): Promise<string[]> => {
   const organisation = settings().getOrganisation(),
-    client = await gitHubClient();
+    client = await gitHubClient("compare-branches");
   if (organisation === undefined || client === undefined) {
     return [];
   }

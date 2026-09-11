@@ -29,7 +29,7 @@ const Blocker = ({ children }: { children: React.ReactNode }) => (
 
 export default async function ComparePage() {
   const organisation = settings().getOrganisation(),
-    client = await gitHubClient(),
+    client = await gitHubClient("compare-page"),
     repositories =
       organisation !== undefined && client !== undefined
         ? await client.listRepositories(organisation)

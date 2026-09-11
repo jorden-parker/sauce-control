@@ -45,12 +45,8 @@ export const runComparison = async (
     throw failure.reason;
   }
   const [base, target] = started as [Instance, Instance],
-    proxy = await startProxy({
-      instances: {
-        base: { hostPort: base.hostPort },
-        target: { hostPort: target.hostPort },
-      },
-    });
+    // The Instances themselves, so a restarted container's new host port reaches the Proxy.
+    proxy = await startProxy({ instances: { base, target } });
   return {
     base,
     proxy,

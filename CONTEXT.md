@@ -28,6 +28,10 @@ _Avoid_: Diff, review, session
 A locally built and running copy of the application from one branch of a Comparison. Every Comparison has exactly two: one per branch.
 _Avoid_: Deployment, server, preview, environment
 
+**Leftover**:
+An Instance, its image, or its clone directory whose owning Sauce Control process has exited. Removed when Sauce Control starts and when it exits.
+_Avoid_: Orphan, stale container, zombie
+
 **Container Runtime**:
 The user's chosen engine for running Instances: Docker or Podman.
 _Avoid_: Docker (as a generic term), engine, backend

@@ -1,5 +1,5 @@
 import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
-import type { RuntimeAdapter } from "./runtime-adapter";
+import type { ContainerDetails, RuntimeAdapter } from "./runtime-adapter";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 import { startPlan } from "./start-command";
 
@@ -13,8 +13,21 @@ export interface CliAdapterOptions {
   startTimeoutMs?: number;
 }
 
+/** The shape shared by `docker inspect` and `podman inspect`. */
+interface InspectResponse {
+  Config?: { Labels?: Record<string, string> | null };
+  Created?: string;
+  Id: string;
+  NetworkSettings?: {
+    Ports?: Record<string, { HostPort: string }[] | null> | null;
+  };
+  State?: { Status?: string };
+}
+
 const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
   DEFAULT_START_TIMEOUT_MS = 120_000,
+  /** Stopping or removing waits for the container's own shutdown grace period. */
+  LIFECYCLE_TIMEOUT_MS = 60_000,
   BUILD_TIMEOUT_MS = 30 * 60 * 1000,
   /** Resource caps for one Instance. */
   HARDENING = [
@@ -47,6 +60,21 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
     }
     return String(error);
   },
+  parseInspect = (stdout: string): ContainerDetails[] =>
+    (JSON.parse(stdout) as InspectResponse[]).map((entry) => {
+      const published = Object.values(entry.NetworkSettings?.Ports ?? {})
+          .flat()
+          .find((binding) => binding !== null && binding !== undefined),
+        hostPort = Number(published?.HostPort);
+      return {
+        containerId: entry.Id,
+        createdAt: entry.Created ?? "",
+        hostPort:
+          Number.isNaN(hostPort) || hostPort === 0 ? undefined : hostPort,
+        labels: entry.Config?.Labels ?? {},
+        state: entry.State?.Status === "running" ? "running" : "stopped",
+      };
+    }),
   isMissingBinary = (error: unknown): boolean =>
     typeof error === "object" &&
     error !== null &&
@@ -120,6 +148,22 @@ export const createCliRuntimeAdapter = (
       }
       return { installed: true, name, running: await isRunning(name), version };
     },
+    inspectContainers: async (name, containerIds) => {
+      if (containerIds.length === 0) {
+        return [];
+      }
+      try {
+        const { stdout } = await run(name, ["inspect", ...containerIds]);
+        return parseInspect(stdout);
+      } catch (error) {
+        // Inspect exits non-zero when any id is gone but still prints the rest.
+        const stdout =
+          typeof error === "object" && error !== null && "stdout" in error
+            ? String(error.stdout)
+            : "";
+        return stdout.trim().startsWith("[") ? parseInspect(stdout) : [];
+      }
+    },
     isListening: async (name, containerId, port) => {
       try {
         await run(name, [
@@ -151,7 +195,9 @@ export const createCliRuntimeAdapter = (
       if (containerIds.length === 0) {
         return;
       }
-      await run(name, ["rm", "-f", ...containerIds]);
+      await shell.run(name, ["rm", "-f", ...containerIds], {
+        timeoutMs: LIFECYCLE_TIMEOUT_MS,
+      });
     },
     removeImages: async (name, label) => {
       await run(name, ["image", "prune", "-af", "--filter", `label=${label}`]);
@@ -204,6 +250,22 @@ export const createCliRuntimeAdapter = (
           { cause: error }
         );
       }
+    },
+    startContainers: async (name, containerIds) => {
+      if (containerIds.length === 0) {
+        return;
+      }
+      await shell.run(name, ["start", ...containerIds], {
+        timeoutMs: LIFECYCLE_TIMEOUT_MS,
+      });
+    },
+    stopContainers: async (name, containerIds) => {
+      if (containerIds.length === 0) {
+        return;
+      }
+      await shell.run(name, ["stop", ...containerIds], {
+        timeoutMs: LIFECYCLE_TIMEOUT_MS,
+      });
     },
   };
 };

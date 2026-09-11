@@ -240,3 +240,73 @@ describe("CLI adapter containers", () => {
     ]);
   });
 });
+
+describe("CLI adapter Instance lifecycle", () => {
+  it("inspects containers into id, labels, state, host port, and creation time", async () => {
+    const shell = fakeShell({
+        outputs: {
+          "docker inspect abc def": JSON.stringify([
+            {
+              Config: {
+                Labels: {
+                  "sauce-control.app": "sauce-control",
+                  "sauce-control.branch": "main",
+                },
+              },
+              Created: "2026-09-11T10:00:00.000000000Z",
+              Id: "abc",
+              NetworkSettings: {
+                Ports: {
+                  "3000/tcp": [{ HostIp: "127.0.0.1", HostPort: "49152" }],
+                },
+              },
+              State: { Status: "running" },
+            },
+            {
+              Config: { Labels: null },
+              Created: "2026-09-11T09:00:00.000000000Z",
+              Id: "def",
+              NetworkSettings: { Ports: { "3000/tcp": null } },
+              State: { Status: "exited" },
+            },
+          ]),
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+
+    await expect(
+      adapter.inspectContainers("docker", ["abc", "def"])
+    ).resolves.toEqual([
+      {
+        containerId: "abc",
+        createdAt: "2026-09-11T10:00:00.000000000Z",
+        hostPort: 49_152,
+        labels: {
+          "sauce-control.app": "sauce-control",
+          "sauce-control.branch": "main",
+        },
+        state: "running",
+      },
+      {
+        containerId: "def",
+        createdAt: "2026-09-11T09:00:00.000000000Z",
+        hostPort: undefined,
+        labels: {},
+        state: "stopped",
+      },
+    ]);
+  });
+
+  it("stops and starts by id without shelling out for an empty list", async () => {
+    const shell = fakeShell({
+        outputs: { "docker start abc": "abc\n", "docker stop abc": "abc\n" },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+
+    await adapter.stopContainers("docker", ["abc"]);
+    await adapter.startContainers("docker", ["abc"]);
+    await adapter.stopContainers("docker", []);
+
+    expect(shell.calls).toEqual(["docker stop abc", "docker start abc"]);
+  });
+});

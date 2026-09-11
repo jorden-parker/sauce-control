@@ -13,7 +13,10 @@ import { loadRuntimeChoice } from "@/container-runtime/runtime-choice";
 import { runtimeAdapter } from "@/container-runtime/runtime";
 import { settings } from "@/settings/settings";
 import { saveOrganisation } from "./actions";
+import { currentSessionId } from "@/instance/current-session";
+import { listInstances } from "@/instance/instances";
 import { ContainerRuntimeCard } from "./container-runtime-card";
+import { InstancesCard } from "./instances-card";
 import { GitHubAccessCard } from "./github-access-card";
 import { gitHubTokenSource } from "@/github/github";
 
@@ -25,7 +28,15 @@ export default async function SettingsPage() {
     runtimeChoice = await loadRuntimeChoice(
       runtimeAdapter,
       settings().getContainerRuntime()
-    );
+    ),
+    instances =
+      runtimeChoice.kind === "use" && runtimeChoice.runtime.running
+        ? await listInstances(
+            runtimeAdapter,
+            runtimeChoice.runtime.name,
+            currentSessionId
+          )
+        : undefined;
 
   return (
     <main className="mx-auto w-full max-w-lg p-8">
@@ -69,6 +80,11 @@ export default async function SettingsPage() {
       <div className="mt-6">
         <ContainerRuntimeCard choice={runtimeChoice} />
       </div>
+      {instances === undefined ? null : (
+        <div className="mt-6">
+          <InstancesCard instances={instances} />
+        </div>
+      )}
       <p className="mt-6 text-sm">
         <Link href="/compare" className="underline">
           Choose what to compare

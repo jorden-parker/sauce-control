@@ -7,7 +7,7 @@ import { cliRuntimeAdapter } from "@/container-runtime/cli-runtime-adapter";
 import { RUNTIME_NAMES } from "@/container-runtime/runtime-status";
 import type { CommandRunner } from "@/shell/command-runner";
 import { runInstance } from "./run-instance";
-import { removeSessionContainers, sweepLeftovers } from "./session";
+import { removeAllInstances, removeSessionContainers } from "./session";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "hello-app"),
   SMOKE_TIMEOUT_MS = 5 * 60 * 1000,
@@ -62,7 +62,10 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
           await cliRuntimeAdapter.runContainer(runtime, {
             environment: {},
             image: `sauce-control/hello-app-main:${sessionId}`,
-            labels: { "sauce-control.session": `${sessionId}-crashed` },
+            labels: {
+              "sauce-control.app": "sauce-control",
+              "sauce-control.session": `${sessionId}-crashed`,
+            },
             port: 3000,
           })
         ).containerId;
@@ -83,10 +86,13 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
       ).resolves.toEqual([leftover]);
 
       await expect(
-        sweepLeftovers(cliRuntimeAdapter, runtime)
+        removeAllInstances(cliRuntimeAdapter, runtime)
       ).resolves.toBeGreaterThanOrEqual(1);
       await expect(
-        cliRuntimeAdapter.listContainers(runtime, "sauce-control.session")
+        cliRuntimeAdapter.listContainers(
+          runtime,
+          "sauce-control.app=sauce-control"
+        )
       ).resolves.toEqual([]);
     },
     SMOKE_TIMEOUT_MS

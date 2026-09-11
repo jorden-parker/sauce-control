@@ -5,19 +5,32 @@ import { join } from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
+import type {
+  ContainerDetails,
+  RuntimeAdapter,
+} from "@/container-runtime/runtime-adapter";
 import type {
   RuntimeName,
   RuntimeStatus,
 } from "@/container-runtime/runtime-status";
 
 /** Per-test picture of the machine's Container Runtimes. */
-const machine: { statuses: Partial<Record<RuntimeName, RuntimeStatus>> } = {
-    statuses: {},
-  },
-  fake: Pick<RuntimeAdapter, "detect" | "start"> = {
+const machine: {
+    containers: ContainerDetails[];
+    statuses: Partial<Record<RuntimeName, RuntimeStatus>>;
+  } = { containers: [], statuses: {} },
+  fake: Pick<
+    RuntimeAdapter,
+    "detect" | "inspectContainers" | "listContainers" | "start"
+  > = {
     detect: (name) =>
       Promise.resolve(machine.statuses[name] ?? { installed: false, name }),
+    inspectContainers: (_name, ids) =>
+      Promise.resolve(
+        machine.containers.filter((c) => ids.includes(c.containerId))
+      ),
+    listContainers: () =>
+      Promise.resolve(machine.containers.map((c) => c.containerId)),
     start: () => Promise.resolve(),
   };
 vi.mock("@/container-runtime/runtime", () => ({ runtimeAdapter: fake }));
@@ -28,6 +41,7 @@ const renderSettingsPage = async (): Promise<void> => {
 };
 
 beforeEach(() => {
+  machine.containers = [];
   process.env.SAUCE_CONTROL_DATA_DIR = mkdtempSync(
     join(tmpdir(), "sauce-control-page-")
   );
@@ -144,5 +158,74 @@ describe("Settings page Container Runtime with nothing installed", () => {
     expect(
       screen.getByText(/neither docker nor podman is installed/iu)
     ).toBeInTheDocument();
+  });
+});
+
+describe("Settings page Instances", () => {
+  it("lists every owned Instance from the runtime with a Stop or Start button and a stop-all", async () => {
+    machine.statuses = {
+      docker: {
+        installed: true,
+        name: "docker",
+        running: true,
+        version: "29.7.2",
+      },
+    };
+    machine.containers = [
+      {
+        containerId: "abc123abc123abc123",
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        hostPort: 49_152,
+        labels: {
+          "sauce-control.app": "sauce-control",
+          "sauce-control.branch": "feature/login",
+          "sauce-control.repository": "web-app",
+          "sauce-control.session": "crashed",
+        },
+        state: "running",
+      },
+      {
+        containerId: "def456def456def456",
+        createdAt: new Date(Date.now() - 3_600_000).toISOString(),
+        hostPort: undefined,
+        labels: {
+          "sauce-control.app": "sauce-control",
+          "sauce-control.branch": "main",
+          "sauce-control.repository": "web-app",
+          "sauce-control.session": "crashed",
+        },
+        state: "stopped",
+      },
+    ];
+    const { settings } = await import("@/settings/settings");
+    settings().saveContainerRuntime("docker");
+    await renderSettingsPage();
+
+    const rows = screen.getAllByTestId("instance-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("feature/login");
+    expect(rows[0]).toHaveTextContent("Leftover");
+    expect(rows[0]).toHaveTextContent("127.0.0.1:49152");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Stop and remove all" })
+    ).toBeInTheDocument();
+  });
+
+  it("is hidden while the runtime is stopped", async () => {
+    machine.statuses = {
+      docker: {
+        installed: true,
+        name: "docker",
+        running: false,
+        version: "29.7.2",
+      },
+    };
+    const { settings } = await import("@/settings/settings");
+    settings().saveContainerRuntime("docker");
+    await renderSettingsPage();
+
+    expect(screen.queryByText("Instances")).not.toBeInTheDocument();
   });
 });

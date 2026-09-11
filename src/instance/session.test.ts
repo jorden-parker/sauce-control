@@ -1,14 +1,21 @@
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
 import {
   registerExitCleanup,
+  remainingInstances,
+  removeAllInstances,
+  removeLeftoverDirectories,
   removeSessionContainers,
-  sweepLeftovers,
 } from "./session";
 
 /** Fake docker holding containers as (id, labels) and remembering image removals by label. */
-const fakeRuntime = (containers: Record<string, Record<string, string>>) => {
+export const fakeRuntime = (
+  containers: Record<string, Record<string, string>>
+) => {
   const store = { ...containers },
     imageRemovals: string[] = [],
     adapter = {
@@ -42,12 +49,14 @@ const fakeRuntime = (containers: Record<string, Record<string, string>>) => {
   return { adapter, imageRemovals, remaining: () => Object.keys(store) };
 };
 
+const OURS = { "sauce-control.app": "sauce-control" };
+
 describe("removing a session's containers", () => {
   it("removes only containers labelled with that session id", async () => {
     const runtime = fakeRuntime({
-      base: { "sauce-control.session": "s1" },
-      other: { "sauce-control.session": "s2" },
-      target: { "sauce-control.session": "s1" },
+      base: { ...OURS, "sauce-control.session": "s1" },
+      other: { ...OURS, "sauce-control.session": "s2" },
+      target: { ...OURS, "sauce-control.session": "s1" },
       unrelated: { "com.docker.compose.project": "x" },
     });
     await removeSessionContainers(runtime.adapter, "docker", "s1");
@@ -56,21 +65,58 @@ describe("removing a session's containers", () => {
   });
 });
 
-describe("sweeping leftovers on startup", () => {
-  it("removes every container from any previous session and leaves unrelated ones", async () => {
+describe("removing every Instance this Sauce Control owns", () => {
+  it("removes containers from any session with our app label and leaves the rest", async () => {
     const runtime = fakeRuntime({
-      crashed: { "sauce-control.session": "old" },
-      older: { "sauce-control.session": "older" },
+      crashed: { ...OURS, "sauce-control.session": "old" },
+      e2e: {
+        "sauce-control.app": "sauce-control-e2e",
+        "sauce-control.session": "e2e-1",
+      },
+      older: { ...OURS, "sauce-control.session": "older" },
       unrelated: { "com.docker.compose.project": "x" },
     });
-    await expect(sweepLeftovers(runtime.adapter, "docker")).resolves.toBe(2);
-    expect(runtime.remaining()).toEqual(["unrelated"]);
-    expect(runtime.imageRemovals).toEqual(["sauce-control.session"]);
+    await expect(removeAllInstances(runtime.adapter, "docker")).resolves.toBe(
+      2
+    );
+    expect(runtime.remaining()).toEqual(["e2e", "unrelated"]);
+    expect(runtime.imageRemovals).toEqual(["sauce-control.app=sauce-control"]);
+    await expect(
+      remainingInstances(runtime.adapter, "docker")
+    ).resolves.toEqual([]);
+  });
+
+  it("reports what is still present so a failed removal is visible", async () => {
+    const runtime = fakeRuntime({
+      stuck: { ...OURS, "sauce-control.session": "old" },
+    });
+    await expect(
+      remainingInstances(runtime.adapter, "docker")
+    ).resolves.toEqual(["stuck"]);
+  });
+});
+
+describe("removing Leftover clone directories", () => {
+  it("deletes every session directory except the current one", () => {
+    const comparisons = mkdtempSync(join(tmpdir(), "comparisons-"));
+    for (const session of ["old", "current"]) {
+      mkdirSync(join(comparisons, session, "main"), { recursive: true });
+      writeFileSync(join(comparisons, session, "main", "file"), "x");
+    }
+    expect(removeLeftoverDirectories(comparisons, "current")).toEqual(["old"]);
+    expect(existsSync(join(comparisons, "old"))).toBe(false);
+    expect(existsSync(join(comparisons, "current", "main", "file"))).toBe(true);
+  });
+
+  it("is a no-op when nothing has run yet", () => {
+    expect(
+      removeLeftoverDirectories(join(tmpdir(), "never-created"), "current")
+    ).toEqual([]);
   });
 });
 
 describe("cleanup on exit", () => {
-  it.each(["SIGINT", "SIGTERM", "uncaughtException"])(
+  it.each(["SIGINT", "SIGTERM", "SIGHUP", "uncaughtException"])(
     "runs the cleanup once and exits on %s",
     async (signal) => {
       const process = Object.assign(new EventEmitter(), {
