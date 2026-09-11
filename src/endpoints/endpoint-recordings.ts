@@ -171,6 +171,9 @@ export const openEndpointRecordings = (
 
 let processRecordings: EndpointRecordings | undefined;
 
+/** The shared identity of a recorded or mocked Endpoint's path. */
+export const endpointPathPattern = pathPattern;
+
 /** The process-wide recordings in the data directory. */
 export const endpointRecordings = (): EndpointRecordings => {
   processRecordings ??= openEndpointRecordings(

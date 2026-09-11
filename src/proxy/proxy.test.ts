@@ -447,3 +447,160 @@ xhr.send('{"name":"Ada"}');`
     );
   });
 });
+
+it("answers both Instances from the active Scenario without calling or recording the real Endpoint", async () => {
+  const calls: string[] = [],
+    recorded: unknown[] = [],
+    port = await listenUpstream("api", (request, response) => {
+      calls.push(request.url ?? "");
+      response.end("live");
+    }),
+    origin = `http://127.0.0.1:${port}`,
+    proxy = await startAll(
+      {},
+      {
+        localEndpointOrigins: [origin],
+        recordEndpoint: (call) => recorded.push(call),
+      }
+    );
+  proxy.setScenario({
+    name: "recorded",
+    schemas: [],
+    responses: [
+      {
+        endpoint: { method: "GET", origin, pathPattern: "/users/{n}" },
+        body: '{"name":"Ada"}',
+        status: 200,
+        delayMs: 0,
+        headers: { "content-type": "application/json" },
+      },
+    ],
+  });
+  await Promise.all(
+    (["base", "target"] as const).map(async (role) => {
+      const response = await fetch(
+        `${proxy.urlFor(role)}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/users/42`)}`
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(await response.json()).toEqual({ name: "Ada" });
+    })
+  );
+  expect(calls).toEqual([]);
+  expect(recorded).toEqual([]);
+});
+
+it("delays slow responses and switches both Instances back to live requests", async () => {
+  const port = await listenUpstream("api"),
+    origin = `http://127.0.0.1:${port}`,
+    proxy = await startAll({}, { localEndpointOrigins: [origin] }),
+    url = `${proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/items`)}`;
+  proxy.setScenario({
+    name: "slow",
+    schemas: [],
+    responses: [
+      {
+        endpoint: { method: "GET", origin, pathPattern: "/items" },
+        body: "delayed",
+        status: 200,
+        delayMs: 120,
+        headers: {},
+      },
+    ],
+  });
+  const start = performance.now(),
+    response = await fetch(url);
+  expect(await response.text()).toBe("delayed");
+  expect(performance.now() - start).toBeGreaterThanOrEqual(110);
+  // Method, origin and path all participate in matching. Other requests stay live.
+  expect(await (await fetch(url, { method: "POST" })).text()).toBe(
+    "api saw /items"
+  );
+  expect(
+    await (
+      await fetch(
+        `${proxy.urlFor("target")}__sauce-control/endpoint?url=${encodeURIComponent(`${origin}/other`)}`
+      )
+    ).text()
+  ).toBe("api saw /other");
+  proxy.setScenario(undefined);
+  expect(await (await fetch(url)).text()).toBe("api saw /items");
+});
+
+it("recomputes mocked response framing, disables caching, and keeps Endpoint cookies out of the browser", async () => {
+  const proxy = await startAll();
+  proxy.setScenario({
+    name: "recorded",
+    schemas: [],
+    responses: [
+      {
+        endpoint: {
+          method: "GET",
+          origin: "https://api.example.com",
+          pathPattern: "/download",
+        },
+        body: new Uint8Array([0, 255, 128, 65]),
+        status: 200,
+        delayMs: 0,
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": "999",
+          "set-cookie": "secret=value",
+          "cache-control": "max-age=86400",
+        },
+      },
+    ],
+  });
+  const response = await fetch(
+    `${proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent("https://api.example.com/download")}`
+  );
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("content-length")).toBe("4");
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+    new Uint8Array([0, 255, 128, 65])
+  );
+});
+
+it("keeps a recorded redirect inside the Proxy so the next Endpoint response also uses the Scenario", async () => {
+  const proxy = await startAll();
+  proxy.setScenario({
+    name: "recorded",
+    schemas: [],
+    responses: [
+      {
+        endpoint: {
+          method: "GET",
+          origin: "https://api.example.com",
+          pathPattern: "/old",
+        },
+        body: "",
+        status: 302,
+        delayMs: 0,
+        headers: { location: "/new" },
+      },
+      {
+        endpoint: {
+          method: "GET",
+          origin: "https://api.example.com",
+          pathPattern: "/new",
+        },
+        body: "recorded destination",
+        status: 200,
+        delayMs: 0,
+        headers: {},
+      },
+    ],
+  });
+  const response = await fetch(
+    `${proxy.urlFor("base")}__sauce-control/endpoint?url=${encodeURIComponent("https://api.example.com/old")}`,
+    { redirect: "manual" }
+  );
+  expect(response.headers.get("location")).toBe(
+    "/__sauce-control/endpoint?url=https%3A%2F%2Fapi.example.com%2Fnew"
+  );
+  const destination = await fetch(
+    new URL(response.headers.get("location")!, proxy.urlFor("base"))
+  );
+  expect(await destination.text()).toBe("recorded destination");
+});

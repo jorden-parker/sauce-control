@@ -27,6 +27,7 @@ ${aboutLink(role)}
 <div id="pane"><div style="height:1000px"></div></div><p id="scroll-echo"></p>
 <button id="open-panel">Open panel</button> <span id="path-echo"></span>
 ${deleteButton(role)}
+<p data-testid="endpoint-response"></p>
 <script>
   var echo = function (id, text) { document.getElementById(id).textContent = text; };
   document.getElementById("name").addEventListener("input", function (event) { echo("name-echo", event.target.value); });
@@ -36,7 +37,7 @@ ${deleteButton(role)}
   var showPath = function () { echo("path-echo", location.pathname); };
   document.getElementById("open-panel").addEventListener("click", function () { history.pushState({}, "", "/panel"); showPath(); });
   window.addEventListener("popstate", showPath);
-  fetch("${apiOrigin}/users/7").catch(function () {});
+  fetch("${apiOrigin}/users/7").then(function (response) { return response.text(); }).then(function (body) { document.querySelector('[data-testid="endpoint-response"]').textContent = body; }).catch(function () {});
 </script>`
     ),
   about = (role: InstanceRole): string =>

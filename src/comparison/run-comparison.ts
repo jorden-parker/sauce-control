@@ -6,6 +6,7 @@ import {
   runInstance,
 } from "@/instance/run-instance";
 import { type Proxy, startProxy } from "@/proxy/proxy";
+import { createScenarioCollection, type Scenario } from "@/scenarios/scenarios";
 
 export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
   baseBranch: string;
@@ -13,6 +14,7 @@ export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
 }
 
 export interface ComparisonDependencies extends InstanceDependencies {
+  localEndpointOrigins?: string[];
   /** Where the Endpoint calls of both Instances are recorded, under the Comparison's Repository. */
   recordings?: EndpointRecordings;
 }
@@ -21,6 +23,7 @@ export interface ComparisonDependencies extends InstanceDependencies {
 export interface RunningComparison {
   base: Instance;
   proxy: Proxy;
+  scenarios: () => Scenario[];
   /** Closes the Proxy and removes both containers. */
   stop: () => Promise<void>;
   target: Instance;
@@ -31,7 +34,8 @@ export const runComparison = async (
   dependencies: ComparisonDependencies,
   { baseBranch, targetBranch, ...shared }: ComparisonRequest
 ): Promise<RunningComparison> => {
-  const { recordings, runtime } = dependencies,
+  const { recordings, runtime, localEndpointOrigins } = dependencies,
+    collection = createScenarioCollection(),
     removeAll = (instances: Instance[]) =>
       runtime.removeContainers(
         shared.runtime,
@@ -54,16 +58,16 @@ export const runComparison = async (
     // The Instances themselves, so a restarted container's new host port reaches the Proxy.
     proxy = await startProxy({
       instances: { base, target },
-      ...(recordings === undefined
-        ? {}
-        : {
-            recordEndpoint: (call) =>
-              recordings.record(shared.repository, call),
-          }),
+      ...(localEndpointOrigins === undefined ? {} : { localEndpointOrigins }),
+      recordEndpoint: (call) => {
+        collection.record(call);
+        recordings?.record(shared.repository, call);
+      },
     });
   return {
     base,
     proxy,
+    scenarios: collection.scenarios,
     stop: async () => {
       await proxy.close();
       await removeAll([base, target]);

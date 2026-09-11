@@ -21,6 +21,7 @@ import { type RunningComparison, runComparison } from "./run-comparison";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { runStubComparison } from "./stub-comparison";
+import { isScenarioName, type ScenarioName } from "@/scenarios/scenario-name";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
@@ -32,6 +33,8 @@ export type ComparisonStatus =
       discovery: Discovery;
       kind: "running";
       repository: string;
+      scenario: ScenarioName;
+      mockedEndpoints: number;
       urls: { base: string; target: string };
     };
 
@@ -117,11 +120,15 @@ const gather = async () => {
 };
 
 /** Starts the saved Comparison in the background; the status reports progress. */
-export const startCurrentComparison = async (): Promise<void> => {
+export const startCurrentComparison = async (
+  scenarioName: ScenarioName = "recorded"
+): Promise<void> => {
   if (status.kind === "starting" || status.kind === "running") {
     return;
   }
   try {
+    if (!isScenarioName(scenarioName))
+      throw new Error("Choose a valid Scenario.");
     const request = await gather();
     status = {
       kind: "starting",
@@ -167,11 +174,17 @@ export const startCurrentComparison = async (): Promise<void> => {
           comparison,
           discovery
         );
+        const scenario = comparison
+          .scenarios()
+          .find(({ name }) => name === scenarioName);
+        comparison.proxy.setScenario(scenario);
         status = {
           affected,
           discovery,
           kind: "running",
           repository: request.repository,
+          scenario: scenarioName,
+          mockedEndpoints: scenario?.responses.length ?? 0,
           urls: {
             base: comparison.proxy.urlFor("base"),
             target: comparison.proxy.urlFor("target"),

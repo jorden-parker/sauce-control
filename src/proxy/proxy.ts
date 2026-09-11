@@ -7,6 +7,7 @@ import {
 } from "node:http";
 import { lookup as dnsLookup } from "node:dns";
 import { request as httpsRequest } from "node:https";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   type AddressInfo,
   BlockList,
@@ -14,6 +15,8 @@ import {
   isIP,
 } from "node:net";
 import type { EndpointCall } from "@/endpoints/endpoint-recordings";
+import { endpointPathPattern } from "@/endpoints/endpoint-recordings";
+import type { Scenario } from "@/scenarios/scenarios";
 import { type CookieJar, createCookieJar } from "./cookie-jar";
 import { ENDPOINT_ROUTE, type Injection, injectIntoHtml } from "./injection";
 import { INSTANCE_ROLES, type InstanceRole } from "./instance-role";
@@ -45,6 +48,8 @@ export interface ProxyRequest {
 export interface Proxy {
   close: () => Promise<void>;
   ports: Record<InstanceRole, number>;
+  /** Changes both Instances together; undefined resumes live Endpoint calls. */
+  setScenario: (scenario: Scenario | undefined) => void;
   /** The URL a browser opens to reach one Instance. */
   urlFor: (role: InstanceRole) => string;
 }
@@ -272,7 +277,8 @@ const cookieHeader = (jar: CookieJar): { cookie?: string } => {
     {
       localEndpointOrigins = [],
       recordEndpoint,
-    }: Pick<ProxyRequest, "localEndpointOrigins" | "recordEndpoint">
+    }: Pick<ProxyRequest, "localEndpointOrigins" | "recordEndpoint">,
+    scenario: Scenario | undefined
   ): Promise<void> => {
     const target = endpointTarget(request.url ?? "");
     if (target === undefined) {
@@ -283,6 +289,31 @@ const cookieHeader = (jar: CookieJar): { cookie?: string } => {
     const method = request.method ?? "GET",
       requestHeaders = forwardedHeaders(request),
       requestBody = new Uint8Array(await collect(request));
+    const matched = scenario?.responses.find(
+      ({ endpoint }) =>
+        endpoint.method === method &&
+        endpoint.origin === target.origin &&
+        endpoint.pathPattern === endpointPathPattern(target.pathname)
+    );
+    if (matched !== undefined) {
+      if (matched.delayMs > 0) await delay(matched.delayMs);
+      response.writeHead(matched.status, {
+        ...Object.fromEntries(
+          Object.entries(matched.headers).filter(
+            ([name]) => !NOT_RETURNED.has(name.toLowerCase())
+          )
+        ),
+        "cache-control": "no-store",
+        "content-length": String(Buffer.byteLength(matched.body)),
+        ...(matched.headers.location === undefined
+          ? {}
+          : {
+              location: `${ENDPOINT_ROUTE}?url=${encodeURIComponent(new URL(matched.headers.location, target).href)}`,
+            }),
+      });
+      response.end(matched.body);
+      return;
+    }
     let upstream: IncomingMessage;
     try {
       upstream = await send(target, {
@@ -344,6 +375,7 @@ export const startProxy = async ({
   localEndpointOrigins,
   recordEndpoint,
 }: ProxyRequest): Promise<Proxy> => {
+  let scenario: Scenario | undefined;
   const jar = createCookieJar(),
     servers = await Promise.all(
       INSTANCE_ROLES.map(async (role) => ({
@@ -351,12 +383,18 @@ export const startProxy = async ({
         server: await listen((request, response) => {
           const path = request.url ?? "/";
           if (isEndpointRoute(path)) {
-            callEndpoint(request, response, role, {
-              ...(localEndpointOrigins === undefined
-                ? {}
-                : { localEndpointOrigins }),
-              ...(recordEndpoint === undefined ? {} : { recordEndpoint }),
-            }).catch((error: Error) => {
+            callEndpoint(
+              request,
+              response,
+              role,
+              {
+                ...(localEndpointOrigins === undefined
+                  ? {}
+                  : { localEndpointOrigins }),
+                ...(recordEndpoint === undefined ? {} : { recordEndpoint }),
+              },
+              scenario
+            ).catch((error: Error) => {
               if (!response.headersSent) {
                 response.writeHead(502, plainText);
               }
@@ -393,6 +431,9 @@ export const startProxy = async ({
       );
     },
     ports,
+    setScenario: (selected) => {
+      scenario = selected;
+    },
     urlFor: (role) => `http://127.0.0.1:${ports[role]}/`,
   };
 };

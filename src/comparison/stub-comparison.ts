@@ -4,6 +4,7 @@ import type { EndpointRecordings } from "@/endpoints/endpoint-recordings";
 import { INSTANCE_ROLES, type InstanceRole, startProxy } from "@/proxy/proxy";
 import { syncAppPage } from "./fixtures/sync-app";
 import type { RunningComparison } from "./run-comparison";
+import { createScenarioCollection } from "@/scenarios/scenarios";
 
 const hostPort = (server: Server): number =>
     (server.address() as AddressInfo).port,
@@ -46,7 +47,8 @@ export const runStubComparison = async ({
   recordings: EndpointRecordings;
   repository: string;
 }): Promise<RunningComparison> => {
-  const api = await serveApi(),
+  const collection = createScenarioCollection(),
+    api = await serveApi(),
     apiOrigin = `http://127.0.0.1:${hostPort(api)}`,
     servers = await Promise.all(
       INSTANCE_ROLES.map((role) => serveFixture(role, apiOrigin))
@@ -59,7 +61,10 @@ export const runStubComparison = async ({
       },
       // The fixture API is on loopback, which the Proxy otherwise refuses to relay to.
       localEndpointOrigins: [apiOrigin],
-      recordEndpoint: (call) => recordings.record(repository, call),
+      recordEndpoint: (call) => {
+        collection.record(call);
+        recordings.record(repository, call);
+      },
     }),
     instance = (branch: string, server: Server) => ({
       branch,
@@ -70,6 +75,7 @@ export const runStubComparison = async ({
   return {
     base: instance("base", base),
     proxy,
+    scenarios: collection.scenarios,
     stop: async () => {
       await proxy.close();
       await Promise.all(

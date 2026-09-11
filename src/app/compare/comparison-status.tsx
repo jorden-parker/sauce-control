@@ -8,6 +8,7 @@ import type { Discovery } from "@/comparison/discover-pages";
 import type { PageState } from "@/crawler/page";
 import { Button } from "@/components/ui/button";
 import { startComparison, stopComparison } from "./actions";
+import { SCENARIO_NAMES } from "@/scenarios/scenario-name";
 
 const POLL_MS = 2000,
   describeState = (state: PageState): string =>
@@ -120,6 +121,13 @@ export const ComparisonStatusPanel = ({
               </a>
             </li>
           </ul>
+          <p className="text-sm">
+            Active Scenario: {status.scenario}.{" "}
+            {count(status.mockedEndpoints, "Endpoint")} mocked.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Unmatched requests continue to the real Endpoint.
+          </p>
           <AffectedPageList
             affected={status.affected}
             discovery={status.discovery}
@@ -133,7 +141,7 @@ export const ComparisonStatusPanel = ({
       ) : status.kind === "starting" ? (
         <p className="text-sm text-muted-foreground">
           {status.stage === "instances"
-            ? "Building and starting both Instances of "
+            ? "Preparing development servers for "
             : status.stage === "discovery"
               ? "Discovering the Pages of "
               : "Detecting the Affected Pages of "}
@@ -149,7 +157,28 @@ export const ComparisonStatusPanel = ({
               {status.message}
             </p>
           ) : null}
-          <form action={startComparison}>
+          <form action={startComparison} className="flex flex-col gap-3">
+            <label htmlFor="scenario" className="text-sm font-medium">
+              Scenario
+            </label>
+            <select
+              id="scenario"
+              name="scenario"
+              defaultValue="recorded"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              aria-describedby="scenario-help"
+            >
+              {SCENARIO_NAMES.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <p id="scenario-help" className="text-sm text-muted-foreground">
+              Both Instances use Base responses: recorded data, empty values, an
+              error, or a three-second delay. Discovery calls real Endpoints
+              first.
+            </p>
             <Button type="submit" disabled={!canRun}>
               Run Comparison
             </Button>
