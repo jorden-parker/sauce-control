@@ -59,7 +59,7 @@ const chosenContainerRuntime = async (): Promise<RuntimeName | undefined> => {
   if (saved !== undefined) {
     return saved;
   }
-  const choice = await loadRuntimeChoice(runtimeAdapter);
+  const choice = await loadRuntimeChoice(runtimeAdapter, saved);
   if (choice.kind !== "use") {
     return undefined;
   }
