@@ -4,6 +4,7 @@ import type { GitHubRequestLog } from "@/github/request-log";
 import type { CommandRunner } from "@/shell/command-runner";
 
 export interface CloneRequest {
+  signal?: AbortSignal;
   branch: string;
   /** Optional local folder of checkouts; a matching one speeds up the clone. */
   codeDirectory?: string | undefined;
@@ -64,11 +65,12 @@ export const cloneBranch = async (
         url,
         destination,
       ],
-      { timeoutMs: CLONE_TIMEOUT_MS }
+      { signal: request.signal, timeoutMs: CLONE_TIMEOUT_MS }
     );
     record("ok");
   } catch (error) {
     record("failed");
+    request.signal?.throwIfAborted();
     const detail = error instanceof Error ? error.message : String(error);
     // The original error carries the token in its URL, so it is redacted rather than attached as the cause.
     // oxlint-disable-next-line preserve-caught-error

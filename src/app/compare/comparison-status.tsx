@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import type { StartupProgress } from "@/comparison/startup-progress";
+import { StartupProgressPanel } from "./startup-progress";
 import type { ComparisonStatus } from "@/comparison/current-comparison";
 import type { AffectedPages } from "@/comparison/detect-affected-pages";
 import type { Discovery } from "@/comparison/discover-pages";
@@ -10,8 +10,7 @@ import { Button } from "@/components/ui/button";
 import { startComparison, stopComparison } from "./actions";
 import { SCENARIO_NAMES } from "@/scenarios/scenario-name";
 
-const POLL_MS = 2000,
-  describeState = (state: PageState): string =>
+const describeState = (state: PageState): string =>
     `${state.path} after ${state.interactions
       .map((interaction) => `${interaction.role} "${interaction.name}"`)
       .join(", then ")}`,
@@ -87,60 +86,59 @@ export const ComparisonStatusPanel = ({
   canRun,
   status,
   manualScenarioNames = [],
+  progress,
 }: {
   canRun: boolean;
   manualScenarioNames?: string[];
   status: ComparisonStatus;
-}) => {
-  const router = useRouter();
-  useEffect(() => {
-    if (status.kind !== "starting") {
-      return;
-    }
-    const timer = setInterval(() => router.refresh(), POLL_MS);
-    return () => clearInterval(timer);
-  }, [router, status.kind]);
-
-  return (
-    <div className="flex flex-col gap-3" data-testid="comparison-status">
-      {status.kind === "running" ? (
-        <>
-          <p className="text-sm">
-            Both Instances of{" "}
-            <span className="font-mono">{status.repository}</span> are up.
-          </p>
-          <ul className="text-sm">
-            <li>
-              Base:{" "}
-              <a className="font-mono underline" href={status.urls.base}>
-                {status.urls.base}
-              </a>
-            </li>
-            <li>
-              Target:{" "}
-              <a className="font-mono underline" href={status.urls.target}>
-                {status.urls.target}
-              </a>
-            </li>
-          </ul>
-          <p className="text-sm">
-            Active Scenario: {status.scenario}.{" "}
-            {count(status.mockedEndpoints, "Endpoint")} mocked.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Unmatched requests continue to the real Endpoint.
-          </p>
-          <AffectedPageList
-            affected={status.affected}
-            discovery={status.discovery}
-          />
-          <form action={stopComparison}>
-            <Button type="submit" variant="outline">
-              Stop Comparison
-            </Button>
-          </form>
-        </>
-      ) : status.kind === "starting" ? (
+  progress?: StartupProgress;
+}) => (
+  <div className="flex flex-col gap-3" data-testid="comparison-status">
+    {progress ? (
+      <StartupProgressPanel key={progress.id} progress={progress} />
+    ) : null}
+    {status.kind === "cancelled" ? (
+      <p role="status">Comparison startup cancelled.</p>
+    ) : null}
+    {status.kind === "running" ? (
+      <>
+        <p className="text-sm">
+          Both Instances of{" "}
+          <span className="font-mono">{status.repository}</span> are up.
+        </p>
+        <ul className="text-sm">
+          <li>
+            Base:{" "}
+            <a className="font-mono underline" href={status.urls.base}>
+              {status.urls.base}
+            </a>
+          </li>
+          <li>
+            Target:{" "}
+            <a className="font-mono underline" href={status.urls.target}>
+              {status.urls.target}
+            </a>
+          </li>
+        </ul>
+        <p className="text-sm">
+          Active Scenario: {status.scenario}.{" "}
+          {count(status.mockedEndpoints, "Endpoint")} mocked.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Unmatched requests continue to the real Endpoint.
+        </p>
+        <AffectedPageList
+          affected={status.affected}
+          discovery={status.discovery}
+        />
+        <form action={stopComparison}>
+          <Button type="submit" variant="outline">
+            Stop Comparison
+          </Button>
+        </form>
+      </>
+    ) : status.kind === "starting" ? (
+      <>
         <p className="text-sm text-muted-foreground">
           {status.stage === "instances"
             ? "Preparing development servers for "
@@ -149,44 +147,49 @@ export const ComparisonStatusPanel = ({
               : "Detecting the Affected Pages of "}
           <span className="font-mono">{status.repository}</span>…
         </p>
-      ) : (
-        <>
-          {status.kind === "failed" ? (
-            <p
-              className="text-sm text-destructive"
-              data-testid="comparison-error"
-            >
-              {status.message}
-            </p>
-          ) : null}
-          <form action={startComparison} className="flex flex-col gap-3">
-            <label htmlFor="scenario" className="text-sm font-medium">
-              Scenario
-            </label>
-            <select
-              id="scenario"
-              name="scenario"
-              defaultValue="recorded"
-              className="h-9 rounded-md border bg-background px-3 text-sm"
-              aria-describedby="scenario-help"
-            >
-              {[...SCENARIO_NAMES, ...manualScenarioNames].map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <p id="scenario-help" className="text-sm text-muted-foreground">
-              Both Instances use Base responses: recorded data, empty values, an
-              error, or a three-second delay. Discovery calls real Endpoints
-              first.
-            </p>
-            <Button type="submit" disabled={!canRun}>
-              Run Comparison
-            </Button>
-          </form>
-        </>
-      )}
-    </div>
-  );
-};
+        <form action={stopComparison}>
+          <Button type="submit" variant="outline">
+            Cancel
+          </Button>
+        </form>
+      </>
+    ) : (
+      <>
+        {status.kind === "failed" ? (
+          <p
+            className="text-sm text-destructive"
+            data-testid="comparison-error"
+          >
+            {status.message}
+          </p>
+        ) : null}
+        <form action={startComparison} className="flex flex-col gap-3">
+          <label htmlFor="scenario" className="text-sm font-medium">
+            Scenario
+          </label>
+          <select
+            id="scenario"
+            name="scenario"
+            defaultValue="recorded"
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            aria-describedby="scenario-help"
+          >
+            {[...SCENARIO_NAMES, ...manualScenarioNames].map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <p id="scenario-help" className="text-sm text-muted-foreground">
+            Both Instances use Base responses: recorded data, empty values, an
+            error, or a three-second delay. Discovery calls real Endpoints
+            first.
+          </p>
+          <Button type="submit" disabled={!canRun}>
+            Run Comparison
+          </Button>
+        </form>
+      </>
+    )}
+  </div>
+);

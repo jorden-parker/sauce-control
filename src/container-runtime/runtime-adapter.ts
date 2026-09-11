@@ -1,6 +1,7 @@
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 
 export interface BuildRequest {
+  signal?: AbortSignal;
   /** Directory sent as the build context; never written to. */
   context: string;
   /** Inline Dockerfile when the Repository has none; otherwise the context's own. */
@@ -10,6 +11,10 @@ export interface BuildRequest {
 }
 
 export interface RunRequest {
+  signal?: AbortSignal;
+  onProgress?: (step: "install" | "start") => void;
+  /** Reports failure before owned-container cleanup finishes. */
+  onFailure?: (error: unknown) => void;
   development?: { installCommand: string; startCommand: string };
   environment: Record<string, string>;
   image: string;
@@ -40,12 +45,13 @@ export interface RuntimeAdapter {
   /** Builds an image from a read-only context. */
   buildImage: (name: RuntimeName, request: BuildRequest) => Promise<void>;
   /** Installed? Version? Running? Never throws for an absent binary. */
-  detect: (name: RuntimeName) => Promise<RuntimeStatus>;
+  detect: (name: RuntimeName, signal?: AbortSignal) => Promise<RuntimeStatus>;
   /** Whether something inside the container listens on `port`. */
   isListening: (
     name: RuntimeName,
     containerId: string,
-    port: number
+    port: number,
+    signal?: AbortSignal
   ) => Promise<boolean>;
   /** Details of the containers; missing ids are skipped. */
   inspectContainers: (

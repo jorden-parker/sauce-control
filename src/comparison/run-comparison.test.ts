@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   RunRequest,
   RuntimeAdapter,
@@ -100,8 +100,8 @@ describe("running a Comparison", () => {
       );
     try {
       expect(
-        runtime.runs.map((run) => run.labels["sauce-control.branch"])
-      ).toEqual(["main", "feature/login"]);
+        runtime.runs.map((run) => run.labels["sauce-control.branch"]).toSorted()
+      ).toEqual(["feature/login", "main"]);
       expect(comparison.base.hostPort).not.toBe(comparison.target.hostPort);
       expect(comparison.proxy.urlFor("base")).toMatch(
         /^http:\/\/127\.0\.0\.1:\d+\/$/u
@@ -124,5 +124,38 @@ describe("running a Comparison", () => {
       runComparison({ git: fakeGit, runtime: runtime.adapter }, request())
     ).rejects.toThrow("feature/login did not listen on port 3000");
     expect(runtime.removed.toSorted()).toEqual(["feature/login", "main"]);
+  });
+  it("reports one failure immediately and aborts the other branch's installation", async () => {
+    const runtime = fakeRuntime(),
+      installing = Promise.withResolvers<void>(),
+      events: string[] = [];
+    runtime.adapter.runContainer = async (_name, run) => {
+      if (run.labels["sauce-control.branch"] === "main") {
+        await installing.promise;
+        throw new Error("installation failed");
+      }
+      installing.resolve();
+      return new Promise((_resolve, reject) => {
+        run.signal?.addEventListener(
+          "abort",
+          () => {
+            events.push("target aborted");
+            reject(run.signal?.reason);
+          },
+          { once: true }
+        );
+      });
+    };
+    const onFailure = vi.fn(() => {
+      events.push("failure shown");
+    });
+    await expect(
+      runComparison(
+        { git: fakeGit, runtime: runtime.adapter },
+        { ...request(), onFailure }
+      )
+    ).rejects.toThrow("installation failed");
+    expect(events).toEqual(["failure shown", "target aborted"]);
+    expect(onFailure).toHaveBeenCalledOnce();
   });
 });

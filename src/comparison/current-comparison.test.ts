@@ -15,19 +15,45 @@ import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 
 /** Only podman is installed, and its machine is running. */
-const fake: Pick<RuntimeAdapter, "detect"> = {
+const fake: Pick<
+  RuntimeAdapter,
+  "detect" | "listContainers" | "removeContainers" | "removeImages"
+> = {
   detect: (name) =>
     Promise.resolve(
       name === "podman"
         ? { installed: true, name, running: true, version: "5.6.0" }
         : { installed: false, name }
     ),
+  listContainers: async () => [],
+  removeContainers: async () => {},
+  removeImages: async () => {},
 };
 vi.mock("@/container-runtime/runtime", () => ({ runtimeAdapter: fake }));
-const { runComparison } = vi.hoisted(() => ({
-  runComparison: vi.fn(() => new Promise(() => {})),
-}));
+const { runComparison, discoverPages, detectAffectedPages } = vi.hoisted(
+  () => ({
+    detectAffectedPages: vi.fn<
+      typeof import("./detect-affected-pages").detectAffectedPages
+    >(async () => ({ changedFiles: [], pages: [], unattributed: [] })),
+    discoverPages: vi.fn<typeof import("./discover-pages").discoverPages>(
+      async () => ({ pages: [], pageStates: [] })
+    ),
+    runComparison: vi.fn<typeof import("./run-comparison").runComparison>(
+      (_deps, request) =>
+        new Promise((_resolve, reject) => {
+          request.signal?.throwIfAborted();
+          request.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("cancelled")),
+            { once: true }
+          );
+        })
+    ),
+  })
+);
 vi.mock("./run-comparison", () => ({ runComparison }));
+vi.mock("./discover-pages", () => ({ discoverPages }));
+vi.mock("./detect-affected-pages", () => ({ detectAffectedPages }));
 vi.mock("@/github/github", () => ({
   gitHubToken: async () => "test-token",
 }));
@@ -151,4 +177,139 @@ describe("currentComparison", () => {
       "secret-token"
     );
   });
+  it("blocks replacement until cancelled work settles and never publishes a late ready result", async () => {
+    const pending =
+      Promise.withResolvers<import("./run-comparison").RunningComparison>();
+    runComparison.mockReturnValueOnce(pending.promise);
+    await comparison.startCurrentComparison();
+    const id = comparison.currentComparisonSnapshot().progress?.id,
+      stopped = comparison.stopCurrentComparison();
+    expect(comparison.currentComparison().kind).toBe("cancelled");
+    expect(comparison.currentComparisonSnapshot().progress?.cleanup).toBe(
+      "pending"
+    );
+    await comparison.startCurrentComparison();
+    expect(runComparison).toHaveBeenCalledTimes(1);
+    const running = runningFixture();
+    pending.resolve(running);
+    await stopped;
+    expect(running.stop).toHaveBeenCalledOnce();
+    expect(comparison.currentComparisonSnapshot()).toMatchObject({
+      progress: { cleanup: "complete", id, outcome: "cancelled" },
+      status: { kind: "cancelled" },
+    });
+    await comparison.startCurrentComparison();
+    expect(comparison.currentComparisonSnapshot().progress?.id).not.toBe(id);
+  });
+
+  it.each(["discovery", "affected"] as const)(
+    "cancels during %s and closes both Instances",
+    async (stage) => {
+      const running = runningFixture();
+      runComparison.mockResolvedValueOnce(running);
+      const entered = Promise.withResolvers<void>(),
+        waitForAbort = (signal?: AbortSignal) =>
+          new Promise<never>((_resolve, reject) => {
+            entered.resolve();
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          });
+      if (stage === "discovery") {
+        discoverPages.mockImplementationOnce((_comparison, _config, options) =>
+          waitForAbort(options?.signal)
+        );
+      } else {
+        detectAffectedPages.mockImplementationOnce(
+          (_git, _comparison, _discovery, options) =>
+            waitForAbort(options?.signal)
+        );
+      }
+      await comparison.startCurrentComparison();
+      await entered.promise;
+      expect(comparison.currentComparison()).toMatchObject({ stage });
+      await comparison.stopCurrentComparison();
+      expect(running.stop).toHaveBeenCalledOnce();
+      expect(comparison.currentComparisonSnapshot().progress).toMatchObject({
+        cleanup: "complete",
+        outcome: "cancelled",
+      });
+    }
+  );
+
+  it("waits for running Comparison cleanup before allowing another startup", async () => {
+    const stopped = Promise.withResolvers<void>(),
+      running = runningFixture();
+    running.stop = () => stopped.promise;
+    runComparison.mockResolvedValueOnce(running);
+    await comparison.startCurrentComparison();
+    await vi.waitFor(() =>
+      expect(comparison.currentComparison().kind).toBe("running")
+    );
+    const stopping = comparison.stopCurrentComparison();
+    await comparison.startCurrentComparison();
+    expect(runComparison).toHaveBeenCalledTimes(1);
+    expect(comparison.currentComparisonSnapshot().progress?.cleanup).toBe(
+      "pending"
+    );
+    stopped.resolve();
+    await stopping;
+    expect(comparison.currentComparisonSnapshot().progress?.cleanup).toBe(
+      "complete"
+    );
+    await comparison.startCurrentComparison();
+    expect(runComparison).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes a safe failure while cleanup is still pending", async () => {
+    const pending =
+      Promise.withResolvers<import("./run-comparison").RunningComparison>();
+    runComparison.mockImplementationOnce((_deps, request) => {
+      request.onFailure?.(
+        new ComparisonStartError("Installation failed."),
+        "base"
+      );
+      return pending.promise;
+    });
+    await comparison.startCurrentComparison();
+    expect(comparison.currentComparison()).toEqual({
+      kind: "failed",
+      message: "Installation failed.",
+    });
+    expect(comparison.currentComparisonSnapshot().progress?.cleanup).toBe(
+      "pending"
+    );
+    pending.reject(new ComparisonStartError("Installation failed."));
+    await vi.waitFor(() =>
+      expect(comparison.currentComparisonSnapshot().progress?.cleanup).toBe(
+        "complete"
+      )
+    );
+  });
 });
+
+function runningFixture(): import("./run-comparison").RunningComparison {
+  return {
+    base: {
+      branch: "main",
+      clonePath: "",
+      containerId: "base",
+      hostPort: 4000,
+    },
+    detectSchemaSources: async () => [],
+    proxy: {
+      close: async () => {},
+      ports: { base: 4000, target: 4001 },
+      setScenario: () => {},
+      urlFor: () => "http://localhost:4000/",
+    },
+    scenarios: () => [],
+    stop: vi.fn(async () => {}),
+    target: {
+      branch: "feature",
+      clonePath: "",
+      containerId: "target",
+      hostPort: 4001,
+    },
+  };
+}

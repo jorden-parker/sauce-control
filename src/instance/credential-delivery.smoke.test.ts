@@ -58,36 +58,48 @@ describe.each(["docker", "podman"] as const)(
       );
       let id: string | undefined;
       try {
-        const instance = await runInstance(
-          {
-            git: {
-              run: async (_command, args) => {
-                cpSync(fixture, args.at(-1)!, { recursive: true });
-                return { stdout: "" };
+        const progress: string[] = [],
+          instance = await runInstance(
+            {
+              git: {
+                run: async (_command, args) => {
+                  cpSync(fixture, args.at(-1)!, { recursive: true });
+                  return { stdout: "" };
+                },
               },
+              runtime: adapter,
             },
-            runtime: adapter,
-          },
-          {
-            branch: "main",
-            config: {
-              crawl: DEFAULT_CRAWL_LIMITS,
-              installCommand: "node install.cjs",
-              pages: { added: [], removed: [] },
-              port: 3000,
-              startCommand: "npm run dev",
-            },
-            environment,
-            organisation: "fixture",
-            readiness: { pollIntervalMs: 200, timeoutMs: 30_000 },
-            repository: "credential-smoke",
-            runtime,
-            sessionId,
-            token: "unused",
-            workDirectory: join(root, "clones"),
-          }
-        );
+            {
+              branch: "main",
+              config: {
+                crawl: DEFAULT_CRAWL_LIMITS,
+                installCommand: "node install.cjs",
+                pages: { added: [], removed: [] },
+                port: 3000,
+                startCommand: "npm run dev",
+              },
+              environment,
+              onProgress: (step) => progress.push(step),
+              organisation: "fixture",
+              readiness: { pollIntervalMs: 200, timeoutMs: 30_000 },
+              repository: "credential-smoke",
+              runtime,
+              sessionId,
+              token: "unused",
+              workDirectory: join(root, "clones"),
+            }
+          );
         id = instance.containerId;
+        expect(progress).toEqual([
+          "clone",
+          "container",
+          "install",
+          "start",
+          "readiness",
+          "ready",
+        ]);
+        expect(JSON.stringify(progress)).not.toContain(token);
+        expect(JSON.stringify(progress)).not.toContain(api);
         const expected = {
           excluded: true,
           install: { hash: digest(token), runtimeAbsent: true },

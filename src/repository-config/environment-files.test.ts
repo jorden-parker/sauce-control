@@ -80,7 +80,9 @@ describe("Environment Files", () => {
       "regular file"
     );
     await writeFile(path, Buffer.from([255]));
-    await expect(readEnvironmentFiles([path])).rejects.toThrow("utf8");
+    await expect(readEnvironmentFiles([path])).rejects.toThrow(
+      "valid UTF-8 text"
+    );
     await writeFile(path, Buffer.alloc(1024 * 1024 + 1));
     await expect(readEnvironmentFiles([path])).rejects.toThrow("1 MiB");
   });

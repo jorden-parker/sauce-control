@@ -52,25 +52,38 @@ const PAGE_CONCURRENCY = 4,
 export const detectAffectedPages = async (
   git: CommandRunner,
   comparison: RunningComparison,
-  discovery: Discovery
+  discovery: Discovery,
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (completed: number, total: number) => void;
+  } = {}
 ): Promise<AffectedPages> => {
   const changed = await changedFiles(git, {
       baseBranch: comparison.base.branch,
       clonePath: comparison.target.clonePath,
+      signal: options.signal,
     }),
     browser = await chromium.launch(),
     loaded = await (async () => {
+      const abort = () => {
+        void browser.close().catch(() => {});
+      };
+      options.signal?.addEventListener("abort", abort, { once: true });
       try {
+        options.signal?.throwIfAborted();
         const queue = [...discovery.pages],
           results: Awaited<ReturnType<typeof modulesOfPage>>[] = [],
           worker = async (): Promise<void> => {
             for (;;) {
+              options.signal?.throwIfAborted();
               const page = queue.shift();
               if (page === undefined) {
                 return;
               }
               // oxlint-disable-next-line no-await-in-loop -- each worker takes one Page at a time
               results.push(await modulesOfPage(browser, comparison, page));
+              options.signal?.throwIfAborted();
+              options.onProgress?.(results.length, discovery.pages.length);
             }
           };
         await Promise.all(
@@ -78,6 +91,7 @@ export const detectAffectedPages = async (
         );
         return results;
       } finally {
+        options.signal?.removeEventListener("abort", abort);
         await browser.close();
       }
     })(),

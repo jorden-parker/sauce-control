@@ -9,11 +9,15 @@ export const sitemapPaths = (xml: string): string[] =>
   });
 
 /** Fetches and parses `sitemap.xml` under `origin`; empty when absent. */
-export const fetchSitemapPaths = async (origin: string): Promise<string[]> => {
+export const fetchSitemapPaths = async (
+  origin: string,
+  signal?: AbortSignal
+): Promise<string[]> => {
   try {
-    const response = await fetch(new URL("/sitemap.xml", origin));
+    const response = await fetch(new URL("/sitemap.xml", origin), { signal });
     return response.ok ? sitemapPaths(await response.text()) : [];
   } catch {
+    signal?.throwIfAborted();
     return [];
   }
 };

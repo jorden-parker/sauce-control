@@ -5,6 +5,7 @@ import {
   type Instance,
   type InstanceDependencies,
   type InstanceRequest,
+  type InstanceStep,
   runInstance,
 } from "@/instance/run-instance";
 import { type Proxy, startProxy } from "@/proxy/proxy";
@@ -14,7 +15,12 @@ import {
   createScenarioCollection,
 } from "@/scenarios/scenarios";
 
-export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
+export interface ComparisonRequest extends Omit<
+  InstanceRequest,
+  "branch" | "onProgress" | "onFailure"
+> {
+  onProgress?: (role: "base" | "target", step: InstanceStep) => void;
+  onFailure?: (error: unknown, role: "base" | "target") => void;
   manualScenarios?: ManualScenario[];
   schemaSources?: SchemaSource[];
   baseBranch: string;
@@ -46,6 +52,8 @@ export const runComparison = async (
     targetBranch,
     schemaSources,
     manualScenarios,
+    onProgress,
+    onFailure,
     ...shared
   }: ComparisonRequest
 ): Promise<RunningComparison> => {
@@ -61,18 +69,57 @@ export const runComparison = async (
         `sauce-control.session=${shared.sessionId}`
       );
     },
+    controller = new AbortController(),
+    signal = shared.signal
+      ? AbortSignal.any([shared.signal, controller.signal])
+      : controller.signal;
+  let firstFailure: unknown,
+    failed = false;
+  const failBranch = (error: unknown, role: "base" | "target") => {
+      if (!failed && !shared.signal?.aborted) {
+        failed = true;
+        firstFailure = error;
+        onFailure?.(error, role);
+        controller.abort();
+      }
+    },
     outcomes = await Promise.allSettled(
-      [baseBranch, targetBranch].map((branch) =>
-        runInstance(dependencies, { ...shared, branch })
+      (["base", "target"] as const).map((role) =>
+        runInstance(dependencies, {
+          ...shared,
+          branch: role === "base" ? baseBranch : targetBranch,
+          onFailure: (error) => failBranch(error, role),
+          onProgress: (step) => onProgress?.(role, step),
+          signal,
+        }).catch((error: unknown) => {
+          failBranch(error, role);
+          throw error;
+        })
       )
     ),
     started = outcomes.flatMap((outcome) =>
       outcome.status === "fulfilled" ? [outcome.value] : []
-    ),
-    failure = outcomes.find((outcome) => outcome.status === "rejected");
-  if (failure !== undefined) {
-    await removeAll(started);
-    throw failure.reason;
+    );
+  if (failed || signal.aborted) {
+    // Include containers whose CLI was interrupted before returning their id.
+    const partial = await runtime.listContainers(
+      shared.runtime,
+      `sauce-control.session=${shared.sessionId}`
+    );
+    await runtime.removeContainers(shared.runtime, [
+      ...new Set([
+        ...partial,
+        ...started.map((instance) => instance.containerId),
+      ]),
+    ]);
+    await runtime.removeImages(
+      shared.runtime,
+      `sauce-control.session=${shared.sessionId}`
+    );
+    if (failed) {
+      throw firstFailure;
+    }
+    signal.throwIfAborted();
   }
   const [base, target] = started as [Instance, Instance],
     // The Instances themselves, so a restarted container's new host port reaches the Proxy.
@@ -87,6 +134,11 @@ export const runComparison = async (
       await removeAll(started);
       throw error;
     });
+  if (signal.aborted) {
+    await proxy.close();
+    await removeAll(started);
+    signal.throwIfAborted();
+  }
   return {
     base,
     detectSchemaSources: (codeDirectory) =>

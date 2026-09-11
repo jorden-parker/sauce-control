@@ -21,7 +21,18 @@ import {
 
 export { BRANCH_LABEL, SESSION_LABEL } from "./labels";
 
+export type InstanceStep =
+  | "clone"
+  | "container"
+  | "install"
+  | "start"
+  | "readiness"
+  | "ready";
+
 export interface InstanceRequest {
+  signal?: AbortSignal;
+  onProgress?: (step: InstanceStep) => void;
+  onFailure?: (error: unknown) => void;
   branch: string;
   codeDirectory?: string | undefined;
   config: RepositoryConfig;
@@ -59,9 +70,10 @@ const slug = (text: string): string =>
       .replaceAll(/^-|-$/gu, ""),
   assertRunning = async (
     adapter: RuntimeAdapter,
-    name: RuntimeName
+    name: RuntimeName,
+    signal?: AbortSignal
   ): Promise<void> => {
-    const status = await adapter.detect(name);
+    const status = await adapter.detect(name, signal);
     if (!status.installed) {
       throw new ComparisonStartError(
         `${name} is not installed. Install it and try again.`
@@ -75,21 +87,23 @@ const slug = (text: string): string =>
   },
   waitUntilListening = async (
     adapter: RuntimeAdapter,
-    { branch, config, readiness, runtime }: InstanceRequest,
+    { branch, config, readiness, runtime, signal }: InstanceRequest,
     containerId: string
   ): Promise<void> => {
     const deadline = Date.now() + readiness.timeoutMs,
       poll = async (): Promise<void> => {
-        if (await adapter.isListening(runtime, containerId, config.port)) {
+        signal?.throwIfAborted();
+        if (
+          await adapter.isListening(runtime, containerId, config.port, signal)
+        ) {
           return;
         }
         if (Date.now() >= deadline) {
-          await adapter.removeContainers(runtime, [containerId]);
           throw new ComparisonStartError(
             `${branch} did not listen on port ${config.port} within ${readiness.timeoutMs}ms. Open Compare → Configure repository and check Development server command and Port. Check Environment Files on Compare for required app credentials.`
           );
         }
-        await sleep(readiness.pollIntervalMs);
+        await sleep(readiness.pollIntervalMs, undefined, { signal });
         await poll();
       };
     await poll();
@@ -105,7 +119,10 @@ export const runInstance = async (
     tag = `sauce-control/${slug(repository)}-${slug(branch)}:${slug(sessionId)}`,
     ownership = { [APP_LABEL]: appLabelValue(), [SESSION_LABEL]: sessionId };
 
-  await assertRunning(runtime, request.runtime);
+  request.signal?.throwIfAborted();
+  await assertRunning(runtime, request.runtime, request.signal);
+  request.signal?.throwIfAborted();
+  request.onProgress?.("clone");
   await cloneBranch(
     git,
     {
@@ -114,16 +131,20 @@ export const runInstance = async (
       destination: clonePath,
       organisation: request.organisation,
       repository,
+      signal: request.signal,
       token: request.token,
     },
     requestLog
   ).catch(() => {
+    request.signal?.throwIfAborted();
     throw new ComparisonStartError(
       "Could not clone the Repository branch. Check the selected branches on Compare, GitHub access in Settings, and the network connection."
     );
   });
+  request.signal?.throwIfAborted();
+  request.onProgress?.("container");
   validateInstanceEnvironment(environment, config.port);
-  const { context, development } = prepareDevelopmentContext(
+  const { context, development } = await prepareDevelopmentContext(
     clonePath,
     request
   );
@@ -132,9 +153,11 @@ export const runInstance = async (
       context,
       dockerfile: generateDockerfile(),
       labels: ownership,
+      signal: request.signal,
       tag,
     });
   } catch {
+    request.signal?.throwIfAborted();
     throw new ComparisonStartError(
       "Could not prepare the development container. Check Container Runtime in Settings and the network connection."
     );
@@ -152,9 +175,22 @@ export const runInstance = async (
         [BRANCH_LABEL]: branch,
         [REPOSITORY_LABEL]: repository,
       },
+      onFailure: request.onFailure,
+      onProgress: request.onProgress,
       port: config.port,
+      signal: request.signal,
     }
   );
-  await waitUntilListening(runtime, request, containerId);
+  try {
+    request.signal?.throwIfAborted();
+    request.onProgress?.("readiness");
+    await waitUntilListening(runtime, request, containerId);
+    request.signal?.throwIfAborted();
+    request.onProgress?.("ready");
+  } catch (error) {
+    request.onFailure?.(error);
+    await runtime.removeContainers(request.runtime, [containerId]);
+    throw error;
+  }
   return { branch, clonePath, containerId, hostPort };
 };

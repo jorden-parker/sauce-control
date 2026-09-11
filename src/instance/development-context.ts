@@ -1,12 +1,13 @@
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
+import { cp } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
   type PackageManifest,
@@ -18,7 +19,7 @@ import { DEVELOPMENT_LAUNCHER } from "./development-launcher";
 import type { InstanceRequest } from "./run-instance";
 
 /** Stage only source; original checkouts and selected files are never mounted or changed. */
-export const prepareDevelopmentContext = (
+export const prepareDevelopmentContext = async (
   clonePath: string,
   request: InstanceRequest
 ) => {
@@ -122,24 +123,31 @@ export const prepareDevelopmentContext = (
       })
     );
   mkdirSync(context, { mode: 0o700, recursive: true });
-  cpSync(clonePath, join(context, "source"), {
-    filter: (path) => {
-      const name = basename(path);
-      return (
-        ![
-          ".git",
-          "node_modules",
-          ".next",
-          "Dockerfile",
-          ".dockerignore",
-        ].includes(name) &&
-        !/^\.env(?:\.|$)/u.test(name) &&
-        !excluded.has(relative(clonePath, path)) &&
-        !lstatSync(path).isSymbolicLink()
-      );
-    },
-    recursive: true,
-  });
-  writeFileSync(join(context, "launcher.cjs"), DEVELOPMENT_LAUNCHER);
+  try {
+    await cp(clonePath, join(context, "source"), {
+      filter: (path) => {
+        request.signal?.throwIfAborted();
+        const name = basename(path);
+        return (
+          ![
+            ".git",
+            "node_modules",
+            ".next",
+            "Dockerfile",
+            ".dockerignore",
+          ].includes(name) &&
+          !/^\.env(?:\.|$)/u.test(name) &&
+          !excluded.has(relative(clonePath, path)) &&
+          !lstatSync(path).isSymbolicLink()
+        );
+      },
+      recursive: true,
+    });
+    request.signal?.throwIfAborted();
+    writeFileSync(join(context, "launcher.cjs"), DEVELOPMENT_LAUNCHER);
+  } catch (error) {
+    rmSync(context, { force: true, recursive: true });
+    throw error;
+  }
   return { context, development };
 };

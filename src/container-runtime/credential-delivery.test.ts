@@ -44,6 +44,105 @@ describe.each(["docker", "podman"] as const)(
         expect((error as Error).cause).toBeUndefined();
       }
     });
+    it("streams only recognized launcher steps before completion and removes the container on abort", async () => {
+      const controller = new AbortController(),
+        progress: string[] = [],
+        removed: string[] = [],
+        adapter = createCliRuntimeAdapter(
+          {
+            run: async (_name, args, options) => {
+              if (args[0] === "rm") {
+                removed.push(args.at(-1)!);
+              }
+              if (args[0] === "exec") {
+                if (JSON.parse(options.input!).probe) {
+                  return { stdout: "ready" };
+                }
+                options.onStdout?.("install");
+                options.onStdout?.("ing\nraw-private-value\nstart");
+                options.onStdout?.("ing\n");
+                expect(progress).toEqual(["install", "start"]);
+                controller.abort();
+                options.signal?.throwIfAborted();
+              }
+              return {
+                stdout:
+                  args[0] === "run"
+                    ? "id"
+                    : args[0] === "port"
+                      ? "127.0.0.1:4000"
+                      : "[]",
+              };
+            },
+          },
+          { platform: "linux" }
+        );
+      await expect(
+        adapter.runContainer(runtime, {
+          development: {
+            installCommand: "npm ci",
+            startCommand: "npm run dev",
+          },
+          environment: { API: "private-value" },
+          image: "test",
+          labels: {},
+          onProgress: (step) => progress.push(step),
+          port: 3000,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(removed).toEqual(["id"]);
+      expect(progress).toEqual(["install", "start"]);
+    });
+    it("reports failure before container removal finishes", async () => {
+      const cleanup = Promise.withResolvers<void>(),
+        reported = Promise.withResolvers<unknown>(),
+        adapter = createCliRuntimeAdapter(
+          {
+            run: async (_name, args, options) => {
+              if (args[0] === "rm") {
+                await cleanup.promise;
+                return { stdout: "" };
+              }
+              return {
+                stdout:
+                  args[0] === "exec"
+                    ? JSON.parse(options.input!).probe
+                      ? "ready"
+                      : "installing\ninstallation-failed"
+                    : args[0] === "run"
+                      ? "id"
+                      : args[0] === "port"
+                        ? "127.0.0.1:4000"
+                        : "[]",
+              };
+            },
+          },
+          { platform: "linux" }
+        );
+      let settled = false;
+      const run = adapter
+          .runContainer(runtime, {
+            development: {
+              installCommand: "npm ci",
+              startCommand: "npm run dev",
+            },
+            environment: {},
+            image: "test",
+            labels: {},
+            onFailure: reported.resolve,
+            port: 3000,
+          })
+          .catch((error: unknown) => {
+            settled = true;
+            return error;
+          }),
+        failure = await reported.promise;
+      expect(failure).toBeInstanceOf(ComparisonStartError);
+      expect(settled).toBe(false);
+      cleanup.resolve();
+      expect(await run).toBe(failure);
+    });
     it("reports installation failure with the settings to check", async () => {
       const adapter = createCliRuntimeAdapter(
         {

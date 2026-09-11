@@ -52,12 +52,12 @@ const roots: string[] = [],
   };
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { force: true, recursive: true });
   }
 });
 
-describe("development context", () => {
-  it("excludes environment files, selected arbitrary names, Git credentials and symlinks before image creation", () => {
+describe("development context", async () => {
+  it("excludes environment files, selected arbitrary names, Git credentials and symlinks before image creation", async () => {
     const { clone, checkout, request } = fixture();
     for (const path of [".env", ".env.local", "secrets.txt", "Dockerfile"]) {
       writeFileSync(join(clone, path), "private-content");
@@ -67,7 +67,7 @@ describe("development context", () => {
     writeFileSync(join(clone, ".git", "config"), "private-content");
     symlinkSync(join(checkout, "secrets.txt"), join(clone, "linked-secret"));
     request.environmentFiles = [join(checkout, "secrets.txt")];
-    const result = prepareDevelopmentContext(clone, request);
+    const result = await prepareDevelopmentContext(clone, request);
     for (const path of [
       ".env",
       ".env.local",
@@ -86,7 +86,7 @@ describe("development context", () => {
       startCommand: "pnpm run develop",
     });
   });
-  it("uses an unambiguous lockfile when packageManager is absent", () => {
+  it("uses an unambiguous lockfile when packageManager is absent", async () => {
     const { clone, request } = fixture();
     writeFileSync(
       join(clone, "package.json"),
@@ -94,13 +94,13 @@ describe("development context", () => {
     );
     writeFileSync(join(clone, "pnpm-lock.yaml"), "");
     expect(
-      prepareDevelopmentContext(clone, request).development.startCommand
+      (await prepareDevelopmentContext(clone, request)).development.startCommand
     ).toBe("pnpm run dev");
   });
-  it("rejects conflicting lockfiles and production installation hooks", () => {
+  it("rejects conflicting lockfiles and production installation hooks", async () => {
     const { clone, request } = fixture();
     writeFileSync(join(clone, "package-lock.json"), "{}");
-    expect(() => prepareDevelopmentContext(clone, request)).toThrow(
+    await expect(prepareDevelopmentContext(clone, request)).rejects.toThrow(
       "conflicts"
     );
     rmSync(join(clone, "package-lock.json"));
@@ -108,14 +108,14 @@ describe("development context", () => {
       join(clone, "package.json"),
       JSON.stringify({ scripts: { dev: "vite", postinstall: "pnpm build" } })
     );
-    expect(() => prepareDevelopmentContext(clone, request)).toThrow(
+    await expect(prepareDevelopmentContext(clone, request)).rejects.toThrow(
       "Production commands cannot run"
     );
   });
-  it("rejects production saved commands even when a dev script exists", () => {
+  it("rejects production saved commands even when a dev script exists", async () => {
     const { clone, request } = fixture();
     request.config.startCommand = "next start";
-    expect(() => prepareDevelopmentContext(clone, request)).toThrow(
+    await expect(prepareDevelopmentContext(clone, request)).rejects.toThrow(
       "Production commands cannot run"
     );
   });

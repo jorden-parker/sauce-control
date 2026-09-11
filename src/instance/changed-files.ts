@@ -1,6 +1,7 @@
 import type { CommandRunner } from "@/shell/command-runner";
 
 export interface ChangedFilesRequest {
+  signal?: AbortSignal;
   baseBranch: string;
   /** The Target Branch clone; the Base Branch is fetched into it so the merge base is known. */
   clonePath: string;
@@ -16,7 +17,7 @@ const FETCH_TIMEOUT_MS = 10 * 60 * 1000,
  */
 export const changedFiles = async (
   git: CommandRunner,
-  { baseBranch, clonePath }: ChangedFilesRequest
+  { baseBranch, clonePath, signal }: ChangedFilesRequest
 ): Promise<string[]> => {
   const baseRef = `origin/${baseBranch}`;
   await git.run(
@@ -27,12 +28,12 @@ export const changedFiles = async (
       "origin",
       `refs/heads/${baseBranch}:refs/remotes/${baseRef}`,
     ],
-    { cwd: clonePath, timeoutMs: FETCH_TIMEOUT_MS }
+    { cwd: clonePath, signal, timeoutMs: FETCH_TIMEOUT_MS }
   );
   const { stdout } = await git.run(
     "git",
     ["diff", "--name-only", "--no-renames", `${baseRef}...HEAD`],
-    { cwd: clonePath, timeoutMs: DIFF_TIMEOUT_MS }
+    { cwd: clonePath, signal, timeoutMs: DIFF_TIMEOUT_MS }
   );
   return stdout
     .split("\n")

@@ -7,6 +7,8 @@ import type { Interaction, Page, PageState } from "./page";
 import { fetchSitemapPaths } from "./sitemap";
 
 export interface CrawlRequest {
+  signal?: AbortSignal;
+  onProgress?: (visited: number) => void;
   limits: CrawlLimits;
   /** The Instance's URL through the Proxy. */
   origin: string;
@@ -81,6 +83,7 @@ const sameOrigin = (href: string, origin: string): string | undefined => {
 
 /** Everything the crawler knows while exploring one Page. */
 interface Visit {
+  signal?: AbortSignal;
   depth: number;
   frontier: Frontier;
   limits: CrawlLimits;
@@ -96,6 +99,7 @@ const open = async (
     visit: Visit,
     sequence: Interaction[]
   ): Promise<boolean> => {
+    visit.signal?.throwIfAborted();
     await visit.page.goto(new URL(visit.path, visit.origin).href, {
       timeout: NAVIGATION_TIMEOUT_MS,
       waitUntil: "load",
@@ -147,6 +151,7 @@ const open = async (
         !before.some((other) => sameNode(other, candidate))
     );
     for (const { url, ...interaction } of candidates) {
+      visit.signal?.throwIfAborted();
       if (url !== undefined) {
         const target = sameOrigin(url, visit.origin);
         if (target !== undefined) {
@@ -175,7 +180,7 @@ const open = async (
   },
   visitPage = async (
     browser: Browser,
-    { limits, origin }: CrawlRequest,
+    { limits, origin, signal }: CrawlRequest,
     frontier: Frontier,
     { depth, path }: { depth: number; path: string }
   ): Promise<void> => {
@@ -189,7 +194,7 @@ const open = async (
       });
       const seen = new Set([await snapshot(page)]);
       await explore(
-        { depth, frontier, limits, origin, page, path, seen },
+        { depth, frontier, limits, origin, page, path, seen, signal },
         [],
         []
       );
@@ -204,23 +209,36 @@ const open = async (
 export const crawl = async ({
   limits,
   origin,
+  signal,
+  onProgress,
 }: CrawlRequest): Promise<CrawlResult> => {
   const frontier = new Frontier(limits);
-  for (const path of ["/", ...(await fetchSitemapPaths(origin))]) {
+  for (const path of ["/", ...(await fetchSitemapPaths(origin, signal))]) {
     frontier.add(path, 0);
   }
-  const browser = await chromium.launch();
+  signal?.throwIfAborted();
+  const browser = await chromium.launch(),
+    abort = () => {
+      void browser.close().catch(() => {});
+    };
+  signal?.addEventListener("abort", abort, { once: true });
+  let visited = 0;
   try {
+    signal?.throwIfAborted();
     for (;;) {
+      signal?.throwIfAborted();
       const next = frontier.queue.shift();
       if (next === undefined) {
         break;
       }
       if (next.depth < limits.maxDepth) {
-        await visitPage(browser, { limits, origin }, frontier, next);
+        await visitPage(browser, { limits, origin, signal }, frontier, next);
+        signal?.throwIfAborted();
+        onProgress?.(++visited);
       }
     }
   } finally {
+    signal?.removeEventListener("abort", abort);
     await browser.close();
   }
   return { pageStates: frontier.pageStates, pages: frontier.pages };

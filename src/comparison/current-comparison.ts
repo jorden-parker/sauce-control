@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import {
+  type ProgressScope,
+  type StartupProgress,
+  StartupProgressTracker,
+} from "./startup-progress";
 import { ComparisonStartError } from "./comparison-start-error";
 import { detectSchemaSources } from "@/scenarios/detect-schema-sources";
 import { mkdirSync, rmSync } from "node:fs";
@@ -33,6 +39,7 @@ import { isScenarioName } from "@/scenarios/scenario-name";
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
   | { kind: "idle" }
+  | { kind: "cancelled" }
   | { kind: "starting"; repository: string; stage: ComparisonStage }
   | { kind: "failed"; message: string }
   | {
@@ -53,29 +60,78 @@ const READINESS = { pollIntervalMs: 1000, timeoutMs: 10 * 60 * 1000 },
   /** The stub has no clones to diff, so nothing changed and detection falls back to every Page. */
   stubGit: CommandRunner = { run: () => Promise.resolve({ stdout: "" }) };
 
-let status: ComparisonStatus = { kind: "idle" },
-  running: RunningComparison | undefined,
-  workDirectory: string | undefined;
-
-export const currentComparison = (): ComparisonStatus => status;
-
-/**
- * The saved Container Runtime, or the only installed one, which ADR 0001 says is used silently
- * and remembered. Detection runs once: after that the saved name answers without shelling out.
- */
-const chosenContainerRuntime = async (): Promise<RuntimeName | undefined> => {
-  const store = settings(),
-    saved = store.getContainerRuntime();
-  if (saved !== undefined) {
-    return saved;
-  }
-  const choice = await loadRuntimeChoice(runtimeAdapter, saved);
-  if (choice.kind !== "use") {
-    return undefined;
-  }
-  store.saveContainerRuntime(choice.runtime.name);
-  return choice.runtime.name;
+interface Attempt {
+  controller: AbortController;
+  progress: StartupProgressTracker;
+  done: Promise<void>;
+  runtime?: RuntimeName;
+  complete: () => void;
+  workDirectory?: string;
+  comparison?: RunningComparison;
+}
+interface ComparisonState {
+  status: ComparisonStatus;
+  running?: RunningComparison;
+  stopping?: Promise<void>;
+  workDirectory?: string;
+  attempt?: Attempt;
+  progress?: StartupProgressTracker;
+  listeners: Set<() => void>;
+}
+// Route Handlers and Server Components must observe the same process-owned run.
+const processState = globalThis as typeof globalThis & {
+    sauceComparisonState?: ComparisonState;
+  },
+  state = (processState.sauceComparisonState ??= {
+    listeners: new Set(),
+    status: { kind: "idle" },
+  }),
+  publish = () => {
+    for (const listener of state.listeners) {
+      listener();
+    }
+  };
+export const currentComparison = (): ComparisonStatus => state.status;
+export interface ComparisonSnapshot {
+  status: ComparisonStatus;
+  progress?: StartupProgress;
+}
+export const currentComparisonSnapshot = (): ComparisonSnapshot => ({
+  progress: state.progress?.snapshot(),
+  status: state.status,
+});
+export const subscribeComparison = (listener: () => void): (() => void) => {
+  state.listeners.add(listener);
+  return () => {
+    state.listeners.delete(listener);
+  };
 };
+const setStatus = (status: ComparisonStatus) => {
+    state.status = status;
+    publish();
+  },
+  safeFailure = (error: unknown): string =>
+    error instanceof EnvironmentFileError ||
+    error instanceof ComparisonStartError
+      ? error.message
+      : "Could not start the Comparison. Open Compare → Configure repository to check the installation command, development server command and Port; check Environment Files on Compare and Container Runtime in Settings. Raw logs are suppressed to protect credentials.",
+  /**
+   * The saved Container Runtime, or the only installed one, which ADR 0001 says is used silently
+   * and remembered. Detection runs once: after that the saved name answers without shelling out.
+   */
+  chosenContainerRuntime = async (): Promise<RuntimeName | undefined> => {
+    const store = settings(),
+      saved = store.getContainerRuntime();
+    if (saved !== undefined) {
+      return saved;
+    }
+    const choice = await loadRuntimeChoice(runtimeAdapter, saved);
+    if (choice.kind !== "use") {
+      return undefined;
+    }
+    store.saveContainerRuntime(choice.runtime.name);
+    return choice.runtime.name;
+  };
 
 /** Whether Run can be pressed: a Container Runtime is chosen (or the runner is stubbed). */
 export const canRunComparison = async (): Promise<boolean> =>
@@ -145,76 +201,197 @@ const gather = async () => {
 export const startCurrentComparison = async (
   scenarioName: string = "recorded"
 ): Promise<void> => {
-  if (status.kind === "starting" || status.kind === "running") {
+  if (state.attempt || state.stopping || state.status.kind === "running") {
     return;
   }
-  status = {
+  const selection = settings().getComparisonSelection(),
+    completion = Promise.withResolvers<void>(),
+    attempt: Attempt = {
+      complete: completion.resolve,
+      controller: new AbortController(),
+      done: completion.promise,
+      progress: new StartupProgressTracker(
+        randomUUID(),
+        selection?.repository ?? "",
+        {
+          base: selection?.baseBranch ?? "",
+          target: selection?.targetBranch ?? "",
+        },
+        publish
+      ),
+    };
+  state.attempt = attempt;
+  state.progress = attempt.progress;
+  setStatus({
     kind: "starting",
-    repository: settings().getComparisonSelection()?.repository ?? "",
+    repository: selection?.repository ?? "",
     stage: "instances",
-  };
+  });
+  const { signal } = attempt.controller;
+  const fail = (error: unknown, scope?: ProgressScope) => {
+      if (
+        state.attempt !== attempt ||
+        signal.aborted ||
+        state.status.kind === "failed"
+      ) {
+        return;
+      }
+      const message = safeFailure(error);
+      setStatus({ kind: "failed", message });
+      attempt.progress.finish("failed", message, scope);
+      attempt.progress.cleanup("pending");
+    },
+    clean = async () => {
+      let failed = false;
+      try {
+        await attempt.comparison?.stop();
+      } catch {
+        failed = true;
+      }
+      if (attempt.workDirectory) {
+        try {
+          rmSync(attempt.workDirectory, { force: true, recursive: true });
+        } catch {
+          failed = true;
+        }
+      }
+      // Retry a label sweep, including partial resources from interrupted runtime commands.
+      if (!useStub()) {
+        const { runtime } = attempt;
+        if (runtime) {
+          try {
+            const ids = await runtimeAdapter.listContainers(
+              runtime,
+              `sauce-control.session=${currentSessionId}`
+            );
+            await runtimeAdapter.removeContainers(runtime, ids);
+            await runtimeAdapter.removeImages(
+              runtime,
+              `sauce-control.session=${currentSessionId}`
+            );
+          } catch {
+            failed = true;
+          }
+        }
+      }
+      attempt.progress.cleanup(failed ? "failed" : "complete");
+    },
+    finish = () => {
+      if (state.attempt === attempt) {
+        state.attempt = undefined;
+      }
+      attempt.complete();
+      publish();
+    };
   try {
-    const selectedRepository = settings().getComparisonSelection()?.repository;
     if (
       !isScenarioName(scenarioName) &&
       !settings()
-        .getScenarioConfig(selectedRepository ?? "")
+        .getScenarioConfig(selection?.repository ?? "")
         .manualScenarios.some(({ name }) => name === scenarioName)
     ) {
       throw new Error("Choose a valid Scenario.");
     }
     const request = await gather();
-    status = {
-      kind: "starting",
-      repository: request.repository,
-      stage: "instances",
-    };
-    workDirectory = join(dataDirectory(), "comparisons", currentSessionId);
-    mkdirSync(workDirectory, { recursive: true });
-    const run =
-      "config" in request
-        ? runComparison(
-            {
-              git: nodeCommandRunner,
-              recordings: endpointRecordings(),
-              requestLog: gitHubRequestLog(),
-              runtime: runtimeAdapter,
-            },
-            { ...request, workDirectory }
-          )
-        : runStubComparison({
-            manualScenarios: request.manualScenarios,
-            recordings: endpointRecordings(),
-            repository: request.repository,
-            schemaSources: request.schemaSources,
-          });
-    run
-      .then(async (comparison) => {
-        running = comparison;
-        status = {
+    attempt.runtime = "config" in request ? request.runtime : undefined;
+    signal.throwIfAborted();
+    attempt.workDirectory = join(
+      dataDirectory(),
+      "comparisons",
+      currentSessionId
+    );
+    mkdirSync(attempt.workDirectory, { recursive: true });
+    const work = async () => {
+      try {
+        const comparison =
+          "config" in request
+            ? await runComparison(
+                {
+                  git: nodeCommandRunner,
+                  recordings: endpointRecordings(),
+                  requestLog: gitHubRequestLog(),
+                  runtime: runtimeAdapter,
+                },
+                {
+                  ...request,
+                  onFailure: fail,
+                  onProgress: (role, step) => {
+                    if (!signal.aborted) attempt.progress.begin(role, step);
+                  },
+                  signal,
+                  workDirectory: attempt.workDirectory!,
+                }
+              )
+            : await runStubComparison({
+                manualScenarios: request.manualScenarios,
+                recordings: endpointRecordings(),
+                repository: request.repository,
+                schemaSources: request.schemaSources,
+              });
+        attempt.comparison = comparison;
+        signal.throwIfAborted();
+        if (!("config" in request)) {
+          for (const role of ["base", "target"] as const) {
+            for (const step of [
+              "clone",
+              "container",
+              "install",
+              "start",
+              "readiness",
+              "ready",
+            ] as const) {
+              attempt.progress.begin(role, step);
+            }
+          }
+        }
+        setStatus({
           kind: "starting",
           repository: request.repository,
           stage: "discovery",
-        };
+        });
+        attempt.progress.begin("comparison", "discovery");
         const discovery = await discoverPages(
           comparison,
-          "config" in request ? request.config : request.discovery
+          "config" in request ? request.config : request.discovery,
+          {
+            onProgress: (role, visited) =>
+              attempt.progress.detail(
+                "comparison",
+                "discovery",
+                `${role === "base" ? "Base" : "Target"}: ${visited} Pages visited.`
+              ),
+            signal,
+          }
         );
-        status = {
+        signal.throwIfAborted();
+        setStatus({
           kind: "starting",
           repository: request.repository,
           stage: "affected",
-        };
+        });
+        attempt.progress.begin("comparison", "affected");
         const affected = await detectAffectedPages(
-            "config" in request ? nodeCommandRunner : stubGit,
-            comparison,
-            discovery
-          ),
-          scenario = comparison
-            .scenarios()
-            .find(({ name }) => name === scenarioName);
+          "config" in request ? nodeCommandRunner : stubGit,
+          comparison,
+          discovery,
+          {
+            onProgress: (completed, total) =>
+              attempt.progress.detail(
+                "comparison",
+                "affected",
+                `${completed} of ${total} Pages checked.`
+              ),
+            signal,
+          }
+        );
+        signal.throwIfAborted();
+        const scenario = comparison
+          .scenarios()
+          .find(({ name }) => name === scenarioName);
         comparison.proxy.setScenario(scenario);
-        status = {
+        state.running = comparison;
+        state.workDirectory = attempt.workDirectory;
+        setStatus({
           affected,
           discovery,
           kind: "running",
@@ -225,33 +402,20 @@ export const startCurrentComparison = async (
             base: comparison.proxy.urlFor("base"),
             target: comparison.proxy.urlFor("target"),
           },
-        };
-      })
-      .catch(async (error: Error) => {
-        await running?.stop().catch(() => {});
-        running = undefined;
-        if (workDirectory) {
-          rmSync(workDirectory, { force: true, recursive: true });
-        }
-        workDirectory = undefined;
-        status = {
-          kind: "failed",
-          message:
-            error instanceof EnvironmentFileError ||
-            error instanceof ComparisonStartError
-              ? error.message
-              : "Could not start the Comparison. Open Compare → Configure repository to check the installation command, development server command and Port; check Environment Files on Compare and Container Runtime in Settings. Raw logs are suppressed to protect credentials.",
-        };
-      });
-  } catch (error) {
-    status = {
-      kind: "failed",
-      message:
-        error instanceof EnvironmentFileError ||
-        error instanceof ComparisonStartError
-          ? error.message
-          : "Could not load the Comparison configuration. Check Repository settings and credentials.",
+        });
+        attempt.progress.finish("ready", "Comparison ready.");
+      } catch (error) {
+        fail(error);
+        await clean();
+      } finally {
+        finish();
+      }
     };
+    void work();
+  } catch (error) {
+    fail(error);
+    await clean();
+    finish();
   }
 };
 
@@ -260,7 +424,7 @@ export const updateInstancePort = (
   containerId: string,
   hostPort: number
 ): void => {
-  for (const instance of [running?.base, running?.target]) {
+  for (const instance of [state.running?.base, state.running?.target]) {
     if (instance?.containerId === containerId) {
       instance.hostPort = hostPort;
     }
@@ -269,13 +433,48 @@ export const updateInstancePort = (
 
 /** Stops the running Comparison: closes the Proxy, removes both containers, deletes the clones. */
 export const stopCurrentComparison = async (): Promise<void> => {
-  const comparison = running;
-  running = undefined;
-  status = { kind: "idle" };
-  await comparison?.stop();
-  if (workDirectory !== undefined) {
-    rmSync(workDirectory, { force: true, recursive: true });
-    workDirectory = undefined;
+  const { attempt } = state;
+  if (attempt) {
+    if (!attempt.controller.signal.aborted) {
+      attempt.progress.finish("cancelled", "Comparison startup cancelled.");
+      attempt.progress.cleanup("pending");
+      if (state.status.kind !== "failed") {
+        setStatus({ kind: "cancelled" });
+      }
+      attempt.controller.abort();
+    }
+    await attempt.done;
+    return;
+  }
+  if (state.stopping) {
+    await state.stopping;
+    return;
+  }
+  const comparison = state.running;
+  if (!comparison) {
+    return;
+  }
+  const directory = state.workDirectory;
+  state.running = undefined;
+  state.workDirectory = undefined;
+  state.progress?.cleanup("pending");
+  setStatus({ kind: "idle" });
+  state.stopping = (async () => {
+    try {
+      await comparison.stop();
+      if (directory) {
+        rmSync(directory, { force: true, recursive: true });
+      }
+      state.progress?.cleanup("complete");
+    } catch {
+      state.progress?.cleanup("failed");
+    }
+  })();
+  try {
+    await state.stopping;
+  } finally {
+    state.stopping = undefined;
+    publish();
   }
 };
 
@@ -284,6 +483,8 @@ export const detectCurrentSchemaSources = async (
   repository: string,
   codeDirectory?: string
 ) =>
-  running && "repository" in status && status.repository === repository
-    ? running.detectSchemaSources(codeDirectory)
+  state.running &&
+  "repository" in state.status &&
+  state.status.repository === repository
+    ? state.running.detectSchemaSources(codeDirectory)
     : detectSchemaSources(codeDirectory ? [codeDirectory] : []);

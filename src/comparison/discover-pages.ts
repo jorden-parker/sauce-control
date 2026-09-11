@@ -30,13 +30,29 @@ const stateKey = (state: PageState): string => JSON.stringify(state),
  */
 export const discoverPages = async (
   { proxy }: RunningComparison,
-  { crawl: limits, pages: manual }: Pick<RepositoryConfig, "crawl" | "pages">
+  { crawl: limits, pages: manual }: Pick<RepositoryConfig, "crawl" | "pages">,
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (role: "base" | "target", visited: number) => void;
+  } = {}
 ): Promise<Discovery> => {
-  const results: CrawlResult[] = await Promise.all(
-      INSTANCE_ROLES.map((role) =>
-        crawl({ limits, origin: proxy.urlFor(role) })
-      )
-    ),
+  const outcomes = await Promise.allSettled(
+    INSTANCE_ROLES.map((role) =>
+      crawl({
+        limits,
+        onProgress: (visited) => options.onProgress?.(role, visited),
+        origin: proxy.urlFor(role),
+        signal: options.signal,
+      })
+    )
+  );
+  options.signal?.throwIfAborted();
+  const results: CrawlResult[] = outcomes.map((outcome) => {
+      if (outcome.status === "rejected") {
+        throw outcome.reason;
+      }
+      return outcome.value;
+    }),
     removed = new Set(manual.removed.map((path) => pageKey(path, limits))),
     pages = uniqueBy(
       [

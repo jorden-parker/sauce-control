@@ -115,9 +115,10 @@ export const createCliRuntimeAdapter = (
           canary = `sauce-probe-${randomUUID()}`,
           probe = await shell.run(name, command, {
             input: JSON.stringify({ canary, probe: true }),
+            signal: request.signal,
             timeoutMs: commandTimeoutMs,
           }),
-          inspected = await run(name, ["inspect", containerId]);
+          inspected = await run(name, ["inspect", containerId], request.signal);
         if (probe.stdout !== "ready" || inspected.stdout.includes(canary)) {
           throw new Error();
         }
@@ -125,22 +126,44 @@ export const createCliRuntimeAdapter = (
         if (restarting) {
           delete environment.NODE_AUTH_TOKEN;
         }
-        const response = await shell.run(name, command, {
-          input: JSON.stringify({
-            environment,
-            port: request.port,
-            ...request.development,
-            ...(restarting ? { installCommand: "" } : {}),
+        let pending = "";
+        const report = (chunk: string) => {
+            pending += chunk;
+            if (pending.length > 1024) {
+              pending = "";
+              return;
+            }
+            const lines = pending.split("\n");
+            pending = lines.pop() ?? "";
+            for (const line of lines) {
+              if (line === "installing") {
+                request.onProgress?.("install");
+              }
+              if (line === "starting") {
+                request.onProgress?.("start");
+              }
+            }
+          },
+          response = await shell.run(name, command, {
+            input: JSON.stringify({
+              environment,
+              port: request.port,
+              ...request.development,
+              ...(restarting ? { installCommand: "" } : {}),
+            }),
+            onStdout: report,
+            signal: request.signal,
+            timeoutMs: BUILD_TIMEOUT_MS,
           }),
-          timeoutMs: BUILD_TIMEOUT_MS,
-        });
-        if (response.stdout === "installation-failed") {
+          result = response.stdout.split("\n").at(-1);
+        if (result === "installation-failed") {
           throw new Error("installation-failed");
         }
-        if (response.stdout !== "started") {
+        if (result !== "started") {
           throw new Error();
         }
       } catch (error) {
+        request.signal?.throwIfAborted();
         // No child output, payload or original error may escape this boundary.
         // oxlint-disable-next-line preserve-caught-error -- Causes can contain credentials in runtime output.
         throw new ComparisonStartError(
@@ -150,13 +173,17 @@ export const createCliRuntimeAdapter = (
         );
       }
     },
-    run = (command: string, args: string[]) =>
-      shell.run(command, args, { timeoutMs: commandTimeoutMs }),
+    run = (command: string, args: string[], signal?: AbortSignal) =>
+      shell.run(command, args, {
+        timeoutMs: commandTimeoutMs,
+        ...(signal ? { signal } : {}),
+      }),
     installedVersion = async (
-      name: RuntimeName
+      name: RuntimeName,
+      signal?: AbortSignal
     ): Promise<string | undefined> => {
       try {
-        const { stdout } = await run(name, ["--version"]);
+        const { stdout } = await run(name, ["--version"], signal);
         return VERSION_PATTERN.exec(stdout)?.[0] ?? stdout.trim();
       } catch (error) {
         if (isMissingBinary(error)) {
@@ -170,11 +197,15 @@ export const createCliRuntimeAdapter = (
      * No `--format`: docker's `.ServerVersion` field does not exist in podman's info, and a
      * template that fails to evaluate exits non-zero even when the machine is up.
      */
-    isRunning = async (name: RuntimeName): Promise<boolean> => {
+    isRunning = async (
+      name: RuntimeName,
+      signal?: AbortSignal
+    ): Promise<boolean> => {
       try {
-        await run(name, ["info"]);
+        await run(name, ["info"], signal);
         return true;
       } catch {
+        signal?.throwIfAborted();
         return false;
       }
     },
@@ -189,7 +220,7 @@ export const createCliRuntimeAdapter = (
     };
 
   return {
-    buildImage: async (name, { context, dockerfile, labels, tag }) => {
+    buildImage: async (name, { context, dockerfile, labels, tag, signal }) => {
       await shell.run(
         name,
         [
@@ -203,15 +234,20 @@ export const createCliRuntimeAdapter = (
           ...(dockerfile === undefined ? [] : ["-f", "-"]),
           context,
         ],
-        { input: dockerfile, timeoutMs: BUILD_TIMEOUT_MS }
+        { input: dockerfile, signal, timeoutMs: BUILD_TIMEOUT_MS }
       );
     },
-    detect: async (name): Promise<RuntimeStatus> => {
-      const version = await installedVersion(name);
+    detect: async (name, signal): Promise<RuntimeStatus> => {
+      const version = await installedVersion(name, signal);
       if (version === undefined) {
         return { installed: false, name };
       }
-      return { installed: true, name, running: await isRunning(name), version };
+      return {
+        installed: true,
+        name,
+        running: await isRunning(name, signal),
+        version,
+      };
     },
     inspectContainers: async (name, containerIds) => {
       if (containerIds.length === 0) {
@@ -229,17 +265,22 @@ export const createCliRuntimeAdapter = (
         return stdout.trim().startsWith("[") ? parseInspect(stdout) : [];
       }
     },
-    isListening: async (name, containerId, port) => {
+    isListening: async (name, containerId, port, signal) => {
       try {
-        await run(name, [
-          "exec",
-          containerId,
-          "sh",
-          "-c",
-          `grep -qi ':${HEX_PORT(port)} ' /proc/net/tcp /proc/net/tcp6`,
-        ]);
+        await run(
+          name,
+          [
+            "exec",
+            containerId,
+            "sh",
+            "-c",
+            `grep -qi ':${HEX_PORT(port)} ' /proc/net/tcp /proc/net/tcp6`,
+          ],
+          signal
+        );
         return true;
       } catch {
+        signal?.throwIfAborted();
         return false;
       }
     },
@@ -293,11 +334,16 @@ export const createCliRuntimeAdapter = (
             ]),
             image,
           ],
-          { timeoutMs: commandTimeoutMs }
+          { signal: request.signal, timeoutMs: commandTimeoutMs }
         ),
         containerId = stdout.trim();
       try {
-        const published = await run(name, ["port", containerId, `${port}/tcp`]),
+        request.signal?.throwIfAborted();
+        const published = await run(
+            name,
+            ["port", containerId, `${port}/tcp`],
+            request.signal
+          ),
           hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
         if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65_535) {
           throw new Error("Could not find the Instance host port.");
@@ -307,10 +353,14 @@ export const createCliRuntimeAdapter = (
           snapshots.set(`${name}:${containerId}`, {
             ...request,
             environment: { ...environment },
+            onFailure: undefined,
+            onProgress: undefined,
+            signal: undefined,
           });
         }
         return { containerId, hostPort };
       } catch (error) {
+        request.onFailure?.(error);
         await shell
           .run(name, ["rm", "-f", containerId], {
             timeoutMs: LIFECYCLE_TIMEOUT_MS,
