@@ -16,8 +16,8 @@ import {
 import { runComparison } from "./run-comparison";
 
 const config: RepositoryConfig = {
-    buildCommand: "",
     crawl: { ...DEFAULT_CRAWL_LIMITS, maxDepth: 1 },
+    installCommand: "",
     pages: { added: [], removed: [] },
     port: 3000,
     startCommand: "",

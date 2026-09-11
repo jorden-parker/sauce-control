@@ -52,23 +52,23 @@ const withComparison = async (
       { ...fixtureDependencies(), localEndpointOrigins: [origin] },
       {
         baseBranch: "main",
-        targetBranch: "feature/login",
-        repository: "web-app",
+        config: {
+          crawl: DEFAULT_CRAWL_LIMITS,
+          installCommand: "",
+          pages: { added: [], removed: [] },
+          port: 3000,
+          startCommand: "",
+          useDotEnvLocal: false,
+        },
+        environment: {},
         organisation: "sauce-labs",
+        readiness: { pollIntervalMs: 1, timeoutMs: 20 },
+        repository: "web-app",
         runtime: "docker",
         sessionId: "scenario-test",
+        targetBranch: "feature/login",
         token: "fixture",
-        environment: {},
         workDirectory,
-        readiness: { pollIntervalMs: 1, timeoutMs: 20 },
-        config: {
-          buildCommand: "",
-          startCommand: "",
-          port: 3000,
-          useDotEnvLocal: false,
-          crawl: DEFAULT_CRAWL_LIMITS,
-          pages: { added: [], removed: [] },
-        },
       }
     );
   try {
@@ -76,7 +76,7 @@ const withComparison = async (
   } finally {
     await comparison.stop();
     await new Promise<void>((resolve) => api.close(() => resolve()));
-    rmSync(workDirectory, { recursive: true, force: true });
+    rmSync(workDirectory, { force: true, recursive: true });
   }
 };
 
@@ -93,11 +93,11 @@ it("generates recorded responses from this Comparison's Base calls, excluding Ta
       .find((scenario) => scenario.name === "recorded");
     expect(recorded?.responses).toEqual([
       {
-        endpoint: { method: "GET", origin, pathPattern: "/users/{n}" },
         body: '{"id":7,"name":"Ada"}',
+        delayMs: 0,
+        endpoint: { method: "GET", origin, pathPattern: "/users/{n}" },
         headers: { "content-type": "application/json" },
         status: 200,
-        delayMs: 0,
       },
     ]);
   });
@@ -119,28 +119,28 @@ it("infers each Endpoint's JSON schema and derives empty, error, and slow respon
       {
         endpoint: { method: "GET", origin, pathPattern: "/users/{n}" },
         schema: {
-          type: "object",
           properties: { id: { type: "integer" }, name: { type: "string" } },
           required: ["id", "name"],
+          type: "object",
         },
       },
     ]);
     expect(
       scenarios.find(({ name }) => name === "empty")?.responses[0]
-    ).toMatchObject({ body: '{"id":0,"name":""}', status: 200, delayMs: 0 });
+    ).toMatchObject({ body: '{"id":0,"name":""}', delayMs: 0, status: 200 });
     expect(
       scenarios.find(({ name }) => name === "error")?.responses[0]
     ).toMatchObject({
       body: '{"error":"Scenario error"}',
-      status: 500,
       delayMs: 0,
+      status: 500,
     });
     expect(
       scenarios.find(({ name }) => name === "slow")?.responses[0]
     ).toMatchObject({
       body: '{"id":7,"name":"Ada"}',
-      status: 200,
       delayMs: 3000,
+      status: 200,
     });
   });
 });
@@ -155,23 +155,23 @@ it("merges all Base samples and array items into a schema with optional fields a
       );
     }
     expect(comparison.scenarios()[0]?.schemas[0]?.schema).toEqual({
-      type: "object",
-      required: ["items"],
       properties: {
         items: {
-          type: "array",
           items: {
-            type: "object",
-            required: ["price", "label"],
             properties: {
-              price: { type: "number" },
               label: { anyOf: [{ type: "string" }, { type: "null" }] },
+              price: { type: "number" },
             },
+            required: ["price", "label"],
+            type: "object",
           },
+          type: "array",
         },
         next: { type: "null" },
         total: { type: "integer" },
       },
+      required: ["items"],
+      type: "object",
     });
     expect(
       comparison.scenarios().find(({ name }) => name === "empty")?.responses[0]

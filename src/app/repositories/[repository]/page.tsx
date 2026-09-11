@@ -81,7 +81,7 @@ export default async function RepositoryConfigPage({
         <CardHeader>
           <CardTitle>Repository Config</CardTitle>
           <CardDescription>
-            How each Instance of this Repository is built and started.
+            How dependencies are installed and development servers are started.
             Pre-filled from the package manifest; saved once and reused.
           </CardDescription>
         </CardHeader>

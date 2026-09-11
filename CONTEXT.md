@@ -25,8 +25,12 @@ A Base Branch and Target Branch of one Repository considered together, with ever
 _Avoid_: Diff, review, session
 
 **Instance**:
-A locally built and running copy of the application from one branch of a Comparison. Every Comparison has exactly two: one per branch.
+A locally running development server for the application from one branch of a Comparison. Every Comparison has exactly two: one per branch.
 _Avoid_: Deployment, server, preview, environment
+
+**Environment File**:
+A user-selected file containing named values needed to install dependencies or run the development servers of a Comparison. A Comparison can use multiple Environment Files, whose values may include credentials.
+_Avoid_: Secret file (not every value is a secret)
 
 **Leftover**:
 An Instance, its image, or its clone directory whose owning Sauce Control process has exited. Removed when Sauce Control starts and when it exits.

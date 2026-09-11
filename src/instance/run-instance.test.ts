@@ -59,6 +59,13 @@ const fakeRuntime = ({
         git.calls += 1;
         const destination = args.at(-1)!;
         mkdirSync(destination, { recursive: true });
+        writeFileSync(
+          join(destination, "package.json"),
+          JSON.stringify({
+            packageManager: "pnpm@10.15.0",
+            scripts: { dev: "node server.js" },
+          })
+        );
         for (const [name, content] of Object.entries(files)) {
           writeFileSync(join(destination, name), content);
         }
@@ -70,8 +77,8 @@ const fakeRuntime = ({
   request = () => ({
     branch: "feature/login",
     config: {
-      buildCommand: "pnpm install --frozen-lockfile",
       crawl: DEFAULT_CRAWL_LIMITS,
+      installCommand: "pnpm install --frozen-lockfile",
       pages: { added: [], removed: [] },
       port: 3000,
       startCommand: "pnpm run dev",
@@ -88,7 +95,7 @@ const fakeRuntime = ({
   });
 
 describe("running one Instance", () => {
-  it("builds with the Repository's own Dockerfile when it has one and reports the Instance ready", async () => {
+  it("ignores the Repository Dockerfile and prepares the trusted development launcher", async () => {
     const runtime = fakeRuntime(),
       git = fakeGit({ Dockerfile: "FROM scratch\n" }),
       instance = await runInstance(
@@ -98,8 +105,8 @@ describe("running one Instance", () => {
 
     expect(runtime.builds).toEqual([
       {
-        context: join(instance.clonePath),
-        dockerfile: undefined,
+        context: `${instance.clonePath}-development`,
+        dockerfile: expect.stringContaining("sauce-control-launcher.cjs"),
         labels: {
           "sauce-control.app": "sauce-control",
           "sauce-control.session": "session-1",
@@ -120,11 +127,9 @@ describe("running one Instance", () => {
 
     await runInstance({ git, runtime: runtime.adapter }, request());
 
+    expect(runtime.builds[0]?.dockerfile).not.toContain("pnpm install");
     expect(runtime.builds[0]?.dockerfile).toContain(
-      "pnpm install --frozen-lockfile"
-    );
-    expect(runtime.builds[0]?.dockerfile).toContain(
-      'CMD ["sh", "-c", "pnpm run dev"]'
+      'CMD ["node", "/opt/sauce-control-launcher.cjs"]'
     );
   });
 
@@ -136,6 +141,10 @@ describe("running one Instance", () => {
 
     expect(runtime.runs).toEqual([
       {
+        development: {
+          installCommand: "pnpm install --frozen-lockfile",
+          startCommand: "pnpm run dev",
+        },
         environment: { API_URL: "https://api.example.test" },
         image: "sauce-control/web-app-feature-login:session-1",
         labels: {

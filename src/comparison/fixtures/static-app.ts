@@ -91,45 +91,44 @@ const FIXTURE_ROOT = join(import.meta.dirname, "static-app"),
     },
   },
   serveDirectory = (
-    root: string,
+    files: Map<string, Buffer>,
     { sourceMaps = true }: FixtureOptions
   ): Promise<Server> =>
     new Promise((resolve) => {
-      const files = filesUnder(root),
-        server = createServer((request, response) => {
-          const pathname = (request.url ?? "/").split("?")[0] ?? "/",
-            path = [pathname, `${pathname}.html`, join(pathname, "index.html")]
-              .map((candidate) => candidate.replace(/^\/+/u, ""))
-              .find((candidate) => files.has(candidate)),
-            extension = path === undefined ? "" : `.${path.split(".").at(-1)}`,
-            type = SERVED_TYPES[extension];
-          if (
-            path === undefined ||
-            type === undefined ||
-            (!sourceMaps && extension === ".map")
-          ) {
-            response.writeHead(404, { "content-type": "text/plain" });
-            response.end("not found");
-            return;
-          }
-          const content = files.get(path)!;
-          response.writeHead(200, { "content-type": type });
-          response.end(
-            sourceMaps || extension !== ".js"
-              ? content
-              : content.toString().replaceAll(SOURCE_MAP_COMMENT, "")
-          );
-        });
+      const server = createServer((request, response) => {
+        const pathname = (request.url ?? "/").split("?")[0] ?? "/",
+          path = [pathname, `${pathname}.html`, join(pathname, "index.html")]
+            .map((candidate) => candidate.replace(/^\/+/u, ""))
+            .find((candidate) => files.has(candidate)),
+          extension = path === undefined ? "" : `.${path.split(".").at(-1)}`,
+          type = SERVED_TYPES[extension];
+        if (
+          path === undefined ||
+          type === undefined ||
+          (!sourceMaps && extension === ".map")
+        ) {
+          response.writeHead(404, { "content-type": "text/plain" });
+          response.end("not found");
+          return;
+        }
+        const content = files.get(path)!;
+        response.writeHead(200, { "content-type": type });
+        response.end(
+          sourceMaps || extension !== ".js"
+            ? content
+            : content.toString().replaceAll(SOURCE_MAP_COMMENT, "")
+        );
+      });
       server.listen(0, "127.0.0.1", () => resolve(server));
     }),
   /** A Container Runtime that "runs" an image by serving its build context over HTTP. */
   fixtureRuntime = (options: FixtureOptions): RuntimeAdapter => {
-    const contexts = new Map<string, string>(),
+    const contexts = new Map<string, Map<string, Buffer>>(),
       servers = new Map<string, Server>();
     let nextId = 0;
     return {
       buildImage: (_name, request) => {
-        contexts.set(request.tag, request.context);
+        contexts.set(request.tag, filesUnder(join(request.context, "source")));
         return Promise.resolve();
       },
       detect: (name) =>

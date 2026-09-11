@@ -1,0 +1,7 @@
+{
+  "name": "comparison-fixture",
+  "private": true,
+  "scripts": {
+    "dev": "node server.cjs"
+  }
+}

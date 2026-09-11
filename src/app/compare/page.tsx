@@ -13,8 +13,8 @@ import {
 import { gitHubClient } from "@/github/github";
 import { settings } from "@/settings/settings";
 import { ComparisonForm } from "./comparison-form";
-import { ComparisonStatusPanel } from "./comparison-status";
 import { EmbeddedInstances } from "./embedded-instances";
+import { RunPanel } from "./run-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -73,8 +73,8 @@ export default async function ComparePage() {
             <CardHeader>
               <CardTitle>Run</CardTitle>
               <CardDescription>
-                Builds and starts both branches, each reachable through the
-                Proxy.
+                Installs dependencies and starts both development servers
+                through the Proxy.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -83,7 +83,13 @@ export default async function ComparePage() {
                   <Blocker>Choose a Container Runtime first.</Blocker>
                 </div>
               )}
-              <ComparisonStatusPanel canRun={canRun} status={status} />
+              <RunPanel
+                key={saved.repository}
+                repository={saved.repository}
+                paths={settings().getEnvironmentFiles(saved.repository)}
+                canRun={canRun}
+                status={status}
+              />
             </CardContent>
           </Card>
         )}

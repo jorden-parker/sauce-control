@@ -19,16 +19,16 @@ export interface ManualPages {
 
 export const DEFAULT_MANUAL_PAGES: ManualPages = { added: [], removed: [] };
 
-/** How one Repository is built and started, saved once and reused for every Comparison of it. */
+/** Dependency installation and development-server configuration for a Repository. */
 export interface RepositoryConfig {
-  buildCommand: string;
+  installCommand: string;
   crawl: CrawlLimits;
   /** Pages the reviewer added or removed by hand, on top of what discovery finds. */
   pages: ManualPages;
   port: number;
   startCommand: string;
-  /** Explicit opt-in to the clone's `.env.local` instead of keychain variables only. */
-  useDotEnvLocal: boolean;
+  /** Legacy setting retained for reading old configurations; never used by execution. */
+  useDotEnvLocal?: boolean;
 }
 
 export interface SettingsStore {
@@ -38,6 +38,8 @@ export interface SettingsStore {
   getContainerRuntime: () => RuntimeName | undefined;
   getOrganisation: () => string | undefined;
   getRepositoryConfig: (repository: string) => RepositoryConfig | undefined;
+  getEnvironmentFiles: (repository: string) => string[];
+  saveEnvironmentFiles: (repository: string, paths: string[]) => void;
   saveCodeDirectory: (directory: string) => void;
   saveComparisonSelection: (selection: ComparisonSelection) => void;
   saveContainerRuntime: (runtime: RuntimeName) => void;
@@ -58,10 +60,9 @@ const CODE_DIRECTORY_KEY = "code-directory",
     Partial<Pick<RepositoryConfig, "crawl" | "pages">> =>
     typeof value === "object" &&
     value !== null &&
-    "buildCommand" in value &&
+    ("installCommand" in value || "buildCommand" in value) &&
     "port" in value &&
-    "startCommand" in value &&
-    "useDotEnvLocal" in value,
+    "startCommand" in value,
   isSelection = (value: unknown): value is ComparisonSelection =>
     typeof value === "object" &&
     value !== null &&
@@ -98,6 +99,15 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
       const value = read(CONTAINER_RUNTIME_KEY);
       return value !== undefined && isRuntimeName(value) ? value : undefined;
     },
+    getEnvironmentFiles: (repository) => {
+      const value = read(`environment-files:${repository}`);
+      if (value === undefined) return [];
+      const paths: unknown = JSON.parse(value);
+      return Array.isArray(paths) &&
+        paths.every((path) => typeof path === "string")
+        ? paths
+        : [];
+    },
     getOrganisation: () => read(ORGANISATION_KEY),
     getRepositoryConfig: (repository) => {
       const value = read(repositoryConfigKey(repository));
@@ -110,6 +120,8 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
             crawl: DEFAULT_CRAWL_LIMITS,
             pages: DEFAULT_MANUAL_PAGES,
             ...parsed,
+            installCommand:
+              "installCommand" in parsed ? parsed.installCommand : "",
           }
         : undefined;
     },
@@ -121,6 +133,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     saveContainerRuntime: (runtime) => {
       upsert.run(CONTAINER_RUNTIME_KEY, runtime);
+    },
+    saveEnvironmentFiles: (repository, paths) => {
+      upsert.run(`environment-files:${repository}`, JSON.stringify(paths));
     },
     saveOrganisation: (organisation) => {
       upsert.run(ORGANISATION_KEY, organisation);

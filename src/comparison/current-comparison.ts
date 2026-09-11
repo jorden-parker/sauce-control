@@ -8,6 +8,11 @@ import { gitHubToken } from "@/github/github";
 import { currentSessionId } from "@/instance/current-session";
 import { keychain } from "@/keychain";
 import { loadEnvironment } from "@/repository-config/environment";
+import {
+  EnvironmentFileError,
+  readEnvironmentFiles,
+  validateInstanceEnvironment,
+} from "@/repository-config/environment-files";
 import { dataDirectory } from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
 import { gitHubRequestLog } from "@/github/request-log";
@@ -21,7 +26,7 @@ import { type RunningComparison, runComparison } from "./run-comparison";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { runStubComparison } from "./stub-comparison";
-import { isScenarioName, type ScenarioName } from "@/scenarios/scenario-name";
+import { type ScenarioName, isScenarioName } from "@/scenarios/scenario-name";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
@@ -82,8 +87,12 @@ const gather = async () => {
     runtime = await chosenContainerRuntime(),
     token = await gitHubToken();
   if (selection === undefined) {
-    throw new Error("Save a Comparison first.");
+    throw new EnvironmentFileError("Save a Comparison first.");
   }
+  const loaded = await readEnvironmentFiles(
+    store.getEnvironmentFiles(selection.repository),
+    loadEnvironment(keychain, selection.repository)
+  );
   if (useStub()) {
     return {
       ...selection,
@@ -94,23 +103,27 @@ const gather = async () => {
     };
   }
   if (organisation === undefined) {
-    throw new Error("Save a GitHub Organisation first.");
+    throw new EnvironmentFileError("Save a GitHub Organisation first.");
   }
   if (runtime === undefined) {
-    throw new Error("Choose a Container Runtime in Settings first.");
+    throw new EnvironmentFileError(
+      "Choose a Container Runtime in Settings first."
+    );
   }
   if (token === undefined) {
-    throw new Error("No GitHub credential found.");
+    throw new EnvironmentFileError("No GitHub credential found.");
   }
   const config = store.getRepositoryConfig(selection.repository);
   if (config === undefined) {
-    throw new Error(`Configure ${selection.repository} first.`);
+    throw new EnvironmentFileError(`Configure ${selection.repository} first.`);
   }
+  validateInstanceEnvironment(loaded.environment, config.port);
   return {
     ...selection,
     codeDirectory: store.getCodeDirectory(),
     config,
-    environment: loadEnvironment(keychain, selection.repository),
+    environment: loaded.environment,
+    environmentFiles: loaded.resolvedPaths,
     organisation,
     readiness: READINESS,
     runtime,
@@ -126,9 +139,15 @@ export const startCurrentComparison = async (
   if (status.kind === "starting" || status.kind === "running") {
     return;
   }
+  status = {
+    kind: "starting",
+    repository: settings().getComparisonSelection()?.repository ?? "",
+    stage: "instances",
+  };
   try {
-    if (!isScenarioName(scenarioName))
+    if (!isScenarioName(scenarioName)) {
       throw new Error("Choose a valid Scenario.");
+    }
     const request = await gather();
     status = {
       kind: "starting",
@@ -170,32 +189,50 @@ export const startCurrentComparison = async (
           stage: "affected",
         };
         const affected = await detectAffectedPages(
-          "config" in request ? nodeCommandRunner : stubGit,
-          comparison,
-          discovery
-        );
-        const scenario = comparison
-          .scenarios()
-          .find(({ name }) => name === scenarioName);
+            "config" in request ? nodeCommandRunner : stubGit,
+            comparison,
+            discovery
+          ),
+          scenario = comparison
+            .scenarios()
+            .find(({ name }) => name === scenarioName);
         comparison.proxy.setScenario(scenario);
         status = {
           affected,
           discovery,
           kind: "running",
+          mockedEndpoints: scenario?.responses.length ?? 0,
           repository: request.repository,
           scenario: scenarioName,
-          mockedEndpoints: scenario?.responses.length ?? 0,
           urls: {
             base: comparison.proxy.urlFor("base"),
             target: comparison.proxy.urlFor("target"),
           },
         };
       })
-      .catch((error: Error) => {
-        status = { kind: "failed", message: error.message };
+      .catch(async (error: Error) => {
+        await running?.stop().catch(() => {});
+        running = undefined;
+        if (workDirectory) {
+          rmSync(workDirectory, { recursive: true, force: true });
+        }
+        workDirectory = undefined;
+        status = {
+          kind: "failed",
+          message:
+            error instanceof EnvironmentFileError
+              ? error.message
+              : "Could not start the Comparison. Check the development commands, credentials and Container Runtime. Raw logs are suppressed.",
+        };
       });
   } catch (error) {
-    status = { kind: "failed", message: (error as Error).message };
+    status = {
+      kind: "failed",
+      message:
+        error instanceof EnvironmentFileError
+          ? error.message
+          : "Could not load the Comparison configuration. Check Repository settings and credentials.",
+    };
   }
 };
 

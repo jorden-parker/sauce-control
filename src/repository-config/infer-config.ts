@@ -5,7 +5,7 @@ export interface PackageManifest {
 }
 
 export interface InferredConfig {
-  buildCommand: string;
+  installCommand: string;
   port: number;
   startCommand: string;
 }
@@ -21,9 +21,9 @@ const DEFAULT_PORT = 3000,
   packageManagerName = (manifest: PackageManifest): string =>
     manifest.packageManager?.split("@")[0] ?? "npm",
   startScript = (scripts: Record<string, string>): string | undefined =>
-    ["dev", "start"].find((name) => name in scripts);
+    ["dev", "develop"].find((name) => name in scripts);
 
-/** Best-effort build and start commands and port for a Repository, editable by the reviewer. */
+/** Dependency installation and development commands inferred from package.json. */
 export const inferRepositoryConfig = (
   manifest: PackageManifest
 ): InferredConfig => {
@@ -35,7 +35,7 @@ export const inferRepositoryConfig = (
         DEFAULT_PORT
     );
   return {
-    buildCommand: INSTALL_COMMANDS[manager] ?? INSTALL_COMMANDS.npm!,
+    installCommand: INSTALL_COMMANDS[manager] ?? INSTALL_COMMANDS.npm!,
     port,
     startCommand: script ? `${manager} run ${script}` : "",
   };
@@ -43,6 +43,8 @@ export const inferRepositoryConfig = (
 
 const SCRIPT_ALIAS = /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([\w:-]+)$/u,
   PRODUCTION_PATTERNS = [
+    /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b/u,
+    /\b(?:next|nuxt|vite|astro|remix)\s+build\b/u,
     /\bnext start\b/u,
     /\bnuxt start\b/u,
     /\bvite preview\b/u,
@@ -61,10 +63,20 @@ export const looksLikeProductionServer = (
   startCommand: string,
   manifest: PackageManifest
 ): boolean => {
-  const alias = SCRIPT_ALIAS.exec(startCommand.trim())?.[1],
-    resolved =
-      alias === undefined
-        ? startCommand
-        : (manifest.scripts?.[alias] ?? startCommand);
-  return PRODUCTION_PATTERNS.some((pattern) => pattern.test(resolved));
+  const visited = new Set<string>(),
+    check = (command: string): boolean => {
+      if (PRODUCTION_PATTERNS.some((pattern) => pattern.test(command))) {
+        return true;
+      }
+      const alias = SCRIPT_ALIAS.exec(command.trim())?.[1];
+      if (!alias || visited.has(alias)) {
+        return false;
+      }
+      visited.add(alias);
+      return [`pre${alias}`, alias, `post${alias}`].some((name) => {
+        const script = manifest.scripts?.[name];
+        return script !== undefined && check(script);
+      });
+    };
+  return check(startCommand);
 };

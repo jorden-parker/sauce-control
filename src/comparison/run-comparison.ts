@@ -6,7 +6,7 @@ import {
   runInstance,
 } from "@/instance/run-instance";
 import { type Proxy, startProxy } from "@/proxy/proxy";
-import { createScenarioCollection, type Scenario } from "@/scenarios/scenarios";
+import { type Scenario, createScenarioCollection } from "@/scenarios/scenarios";
 
 export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
   baseBranch: string;
@@ -36,11 +36,16 @@ export const runComparison = async (
 ): Promise<RunningComparison> => {
   const { recordings, runtime, localEndpointOrigins } = dependencies,
     collection = createScenarioCollection(),
-    removeAll = (instances: Instance[]) =>
-      runtime.removeContainers(
+    removeAll = async (instances: Instance[]) => {
+      await runtime.removeContainers(
         shared.runtime,
         instances.map((instance) => instance.containerId)
-      ),
+      );
+      await runtime.removeImages(
+        shared.runtime,
+        `sauce-control.session=${shared.sessionId}`
+      );
+    },
     outcomes = await Promise.allSettled(
       [baseBranch, targetBranch].map((branch) =>
         runInstance(dependencies, { ...shared, branch })
@@ -63,14 +68,20 @@ export const runComparison = async (
         collection.record(call);
         recordings?.record(shared.repository, call);
       },
+    }).catch(async (error: unknown) => {
+      await removeAll(started);
+      throw error;
     });
   return {
     base,
     proxy,
     scenarios: collection.scenarios,
     stop: async () => {
-      await proxy.close();
-      await removeAll([base, target]);
+      try {
+        await proxy.close();
+      } finally {
+        await removeAll([base, target]);
+      }
     },
     target,
   };

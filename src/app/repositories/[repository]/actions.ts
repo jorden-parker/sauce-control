@@ -34,20 +34,19 @@ export const saveRepositoryConfig = async (
     return;
   }
   settings().saveRepositoryConfig(repository, {
-    buildCommand: field("buildCommand"),
     crawl: {
       collapseNumericSegments: formData.get("collapseNumericSegments") === "on",
       maxDepth: integer(field("maxDepth"), DEFAULT_CRAWL_LIMITS.maxDepth),
       pageLimit: integer(field("pageLimit"), DEFAULT_CRAWL_LIMITS.pageLimit),
       stripQuery: formData.get("stripQuery") === "on",
     },
+    installCommand: field("installCommand"),
     pages: {
       added: pathList(field("addedPages")),
       removed: pathList(field("removedPages")),
     },
     port: Number.isNaN(port) ? DEFAULT_PORT : port,
     startCommand: field("startCommand"),
-    useDotEnvLocal: formData.get("useDotEnvLocal") === "on",
   });
   const pasted = String(formData.get("environment") ?? "");
   if (pasted.trim() !== "") {

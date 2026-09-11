@@ -41,8 +41,8 @@ describe.each(RUNTIME_NAMES)("real %s Comparison", (runtime) => {
           {
             baseBranch: "main",
             config: {
-              buildCommand: "",
               crawl: DEFAULT_CRAWL_LIMITS,
+              installCommand: "",
               pages: { added: [], removed: [] },
               port: 3000,
               startCommand: "npm run start",

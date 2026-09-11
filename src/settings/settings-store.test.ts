@@ -76,13 +76,13 @@ describe("settings store Repository Config", () => {
     const path = freshDatabasePath(),
       first = openSettingsStore(path);
     first.saveRepositoryConfig("web-app", {
-      buildCommand: "pnpm install --frozen-lockfile",
       crawl: {
         collapseNumericSegments: false,
         maxDepth: 2,
         pageLimit: 10,
         stripQuery: false,
       },
+      installCommand: "pnpm install --frozen-lockfile",
       pages: { added: ["/hidden"], removed: ["/legal"] },
       port: 4000,
       startCommand: "pnpm run dev",
@@ -92,13 +92,13 @@ describe("settings store Repository Config", () => {
 
     const second = openSettingsStore(path);
     expect(second.getRepositoryConfig("web-app")).toEqual({
-      buildCommand: "pnpm install --frozen-lockfile",
       crawl: {
         collapseNumericSegments: false,
         maxDepth: 2,
         pageLimit: 10,
         stripQuery: false,
       },
+      installCommand: "pnpm install --frozen-lockfile",
       pages: { added: ["/hidden"], removed: ["/legal"] },
       port: 4000,
       startCommand: "pnpm run dev",
@@ -111,7 +111,7 @@ describe("settings store Repository Config", () => {
     const path = freshDatabasePath(),
       store = openSettingsStore(path);
     store.saveRepositoryConfig("web-app", {
-      buildCommand: "npm install",
+      installCommand: "npm install",
       port: 3000,
       startCommand: "npm run dev",
       useDotEnvLocal: false,

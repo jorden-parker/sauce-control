@@ -34,16 +34,16 @@ export const ConfigForm = ({
     <form action={saveRepositoryConfig} className="flex flex-col gap-4">
       <input type="hidden" name="repository" value={repository} />
       <div className="flex flex-col gap-2">
-        <Label htmlFor="buildCommand">Build command</Label>
+        <Label htmlFor="installCommand">Dependency installation command</Label>
         <Input
-          id="buildCommand"
-          name="buildCommand"
-          defaultValue={config.buildCommand}
+          id="installCommand"
+          name="installCommand"
+          defaultValue={config.installCommand}
           autoComplete="off"
         />
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="startCommand">Start command</Label>
+        <Label htmlFor="startCommand">Development server command</Label>
         <Input
           id="startCommand"
           name="startCommand"
@@ -57,9 +57,7 @@ export const ConfigForm = ({
             className="text-sm text-amber-600 dark:text-amber-400"
             data-testid="production-warning"
           >
-            This looks like a production server. Production builds usually ship
-            without source maps, so Affected Page detection may fall back to
-            comparing every Page.
+            Choose a development-server command. Production commands cannot run.
           </p>
         ) : null}
       </div>
@@ -92,23 +90,6 @@ export const ConfigForm = ({
             ? "1 variable stored in the keychain."
             : `${environmentCount} variables stored in the keychain.`}{" "}
           Pasting replaces them; leave empty to keep them.
-        </p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="useDotEnvLocal"
-            name="useDotEnvLocal"
-            defaultChecked={config.useDotEnvLocal}
-          />
-          <Label htmlFor="useDotEnvLocal">
-            Use the clone&apos;s .env.local
-          </Label>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Warning: any secrets in that file are copied into the Instance image
-          on this machine. Off by default; keychain variables are always used.
         </p>
       </div>
       <fieldset className="flex flex-col gap-4 rounded-md border p-4">
@@ -184,7 +165,7 @@ export const ConfigForm = ({
           them; removed Pages are left out even when it finds them.
         </p>
       </fieldset>
-      <Button type="submit" className="self-start">
+      <Button type="submit" className="self-start" disabled={productionWarning}>
         Save configuration
       </Button>
       {saved ? (

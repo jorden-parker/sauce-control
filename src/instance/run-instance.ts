@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
@@ -8,6 +8,8 @@ import type { GitHubRequestLog } from "@/github/request-log";
 import type { CommandRunner } from "@/shell/command-runner";
 import { cloneBranch } from "./clone-branch";
 import { generateDockerfile } from "./dockerfile";
+import { prepareDevelopmentContext } from "./development-context";
+import { validateInstanceEnvironment } from "@/repository-config/environment-files";
 import {
   APP_LABEL,
   BRANCH_LABEL,
@@ -23,6 +25,7 @@ export interface InstanceRequest {
   codeDirectory?: string | undefined;
   config: RepositoryConfig;
   environment: Record<string, string>;
+  environmentFiles?: string[];
   organisation: string;
   readiness: { pollIntervalMs: number; timeoutMs: number };
   repository: string;
@@ -112,17 +115,29 @@ export const runInstance = async (
     },
     requestLog
   );
-  await runtime.buildImage(request.runtime, {
-    context: clonePath,
-    dockerfile: existsSync(join(clonePath, "Dockerfile"))
-      ? undefined
-      : generateDockerfile(config),
-    labels: ownership,
-    tag,
-  });
+  validateInstanceEnvironment(environment, config.port);
+  const { context, development } = prepareDevelopmentContext(
+    clonePath,
+    request
+  );
+  try {
+    await runtime.buildImage(request.runtime, {
+      context,
+      dockerfile: generateDockerfile(),
+      labels: ownership,
+      tag,
+    });
+  } catch {
+    throw new Error(
+      "Could not prepare the development container. Check the Container Runtime and network connection."
+    );
+  } finally {
+    rmSync(context, { force: true, recursive: true });
+  }
   const { containerId, hostPort } = await runtime.runContainer(
     request.runtime,
     {
+      development,
       environment,
       image: tag,
       labels: {

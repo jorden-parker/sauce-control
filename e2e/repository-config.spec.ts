@@ -12,23 +12,28 @@ test("reviewer sees commands pre-filled from the package manifest, gets a produc
 }) => {
   await page.goto("/repositories/web-app");
 
-  await expect(page.getByLabel("Build command")).toHaveValue(
+  await expect(page.getByLabel("Dependency installation command")).toHaveValue(
     "pnpm install --frozen-lockfile"
   );
-  await expect(page.getByLabel("Start command")).toHaveValue("pnpm run dev");
+  await expect(page.getByLabel("Development server command")).toHaveValue(
+    "pnpm run dev"
+  );
   await expect(page.getByLabel("Port")).toHaveValue("3000");
   await expect(page.getByTestId("production-warning")).toBeHidden();
 
-  await page.getByLabel("Start command").fill("pnpm run start");
+  await page.getByLabel("Development server command").fill("pnpm run start");
   await expect(page.getByTestId("production-warning")).toContainText(
-    "looks like a production server"
+    "Production commands cannot run"
   );
 
   await page.getByLabel("Port").fill("4000");
   await page
     .getByLabel("Environment variables")
     .fill("API_URL=https://api.example.test\nSECRET=shh");
-  await page.getByLabel("Use the clone's .env.local").check();
+  await expect(
+    page.getByRole("button", { name: "Save configuration" })
+  ).toBeDisabled();
+  await page.getByLabel("Development server command").fill("pnpm run dev");
   await page.getByRole("button", { name: "Save configuration" }).click();
 
   await expect(page.getByTestId("saved-config")).toContainText("Saved");
@@ -37,9 +42,11 @@ test("reviewer sees commands pre-filled from the package manifest, gets a produc
   );
 
   await page.reload();
-  await expect(page.getByLabel("Start command")).toHaveValue("pnpm run start");
+  await expect(page.getByLabel("Development server command")).toHaveValue(
+    "pnpm run dev"
+  );
   await expect(page.getByLabel("Port")).toHaveValue("4000");
-  await expect(page.getByLabel("Use the clone's .env.local")).toBeChecked();
+  await expect(page.getByLabel("Use the clone's .env.local")).toHaveCount(0);
   await expect(page.getByLabel("Environment variables")).toHaveValue("");
 });
 

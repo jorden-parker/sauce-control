@@ -16,20 +16,28 @@ describe("Repository Config inferred from a package manifest", () => {
         },
       })
     ).toEqual({
-      buildCommand: "pnpm install --frozen-lockfile",
+      installCommand: "pnpm install --frozen-lockfile",
       port: 4000,
       startCommand: "pnpm run dev",
     });
   });
 
-  it("falls back to npm, the start script, and port 3000 when the manifest is bare", () => {
+  it("never falls back to a start script", () => {
     expect(
       inferRepositoryConfig({ scripts: { start: "node server.js" } })
     ).toEqual({
-      buildCommand: "npm install",
+      installCommand: "npm install",
       port: 3000,
-      startCommand: "npm run start",
+      startCommand: "",
     });
+  });
+  it("detects develop from package.json", () => {
+    expect(
+      inferRepositoryConfig({
+        packageManager: "pnpm@10",
+        scripts: { develop: "vite" },
+      }).startCommand
+    ).toBe("pnpm run develop");
   });
 });
 

@@ -10,6 +10,7 @@ export interface BuildRequest {
 }
 
 export interface RunRequest {
+  development?: { installCommand: string; startCommand: string };
   environment: Record<string, string>;
   image: string;
   labels: Record<string, string>;

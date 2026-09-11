@@ -165,11 +165,11 @@ describe.each(RUNTIME_NAMES)("real %s adapter", (name) => {
 });
 
 describe("CLI adapter containers", () => {
-  it("runs a hardened detached container: no host network, all capabilities dropped, caps, loopback port, labels, env by name only", async () => {
+  it("runs a hardened container without values in its environment or arguments", async () => {
     const shell = fakeShell({
         outputs: {
           "docker port abc123def 3000/tcp": "127.0.0.1:49152\n",
-          "docker run -d --cap-drop ALL --security-opt no-new-privileges --memory 4g --cpus 2 --pids-limit 1024 --tmpfs /tmp -p 127.0.0.1::3000 -l sauce-control.session=s1 -e API_URL sauce-control/web-app:s1":
+          "docker run -d --log-driver none --cap-drop ALL --security-opt no-new-privileges --memory 4g --cpus 2 --pids-limit 1024 --tmpfs /tmp -p 127.0.0.1::3000 -l sauce-control.session=s1 sauce-control/web-app:s1":
             "abc123def\n",
         },
       }),
@@ -177,15 +177,15 @@ describe("CLI adapter containers", () => {
 
     await expect(
       adapter.runContainer("docker", {
-        environment: { API_URL: "https://api.example.test" },
+        environment: {},
         image: "sauce-control/web-app:s1",
         labels: { "sauce-control.session": "s1" },
         port: 3000,
       })
     ).resolves.toEqual({ containerId: "abc123def", hostPort: 49_152 });
-    expect(shell.environments.at(-2)).toEqual({
-      API_URL: "https://api.example.test",
-    });
+    expect(
+      shell.environments.every((environment) => environment === undefined)
+    ).toBe(true);
   });
 
   it("builds from the context with an inline Dockerfile on stdin when one is generated, labelling the image", async () => {
@@ -323,9 +323,12 @@ describe("CLI adapter Instance lifecycle", () => {
       adapter = createCliRuntimeAdapter(shell, mac);
 
     await adapter.stopContainers("docker", ["abc"]);
-    await adapter.startContainers("docker", ["abc"]);
+    await expect(adapter.startContainers("docker", ["abc"])).rejects.toThrow(
+      "Run a new Comparison"
+    );
+    await adapter.startContainers("docker", []);
     await adapter.stopContainers("docker", []);
 
-    expect(shell.calls).toEqual(["docker stop abc", "docker start abc"]);
+    expect(shell.calls).toEqual(["docker stop abc"]);
   });
 });

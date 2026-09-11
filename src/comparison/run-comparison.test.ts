@@ -59,6 +59,13 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
     run: (_command, args) => {
       const destination = args.at(-1)!;
       mkdirSync(destination, { recursive: true });
+      writeFileSync(
+        join(destination, "package.json"),
+        JSON.stringify({
+          packageManager: "pnpm@10.15.0",
+          scripts: { dev: "node server.js" },
+        })
+      );
       writeFileSync(join(destination, "Dockerfile"), "FROM scratch\n");
       return Promise.resolve({ stdout: "" });
     },
@@ -66,8 +73,8 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
   request = () => ({
     baseBranch: "main",
     config: {
-      buildCommand: "pnpm install",
       crawl: DEFAULT_CRAWL_LIMITS,
+      installCommand: "pnpm install",
       pages: { added: [], removed: [] },
       port: 3000,
       startCommand: "pnpm run dev",

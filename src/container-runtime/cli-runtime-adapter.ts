@@ -1,5 +1,11 @@
 import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
-import type { ContainerDetails, RuntimeAdapter } from "./runtime-adapter";
+import type {
+  ContainerDetails,
+  RunRequest,
+  RuntimeAdapter,
+} from "./runtime-adapter";
+import { DEVELOPMENT_TRANSPORT } from "@/instance/development-launcher";
+import { randomUUID } from "node:crypto";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 import { startPlan } from "./start-command";
 
@@ -89,7 +95,61 @@ export const createCliRuntimeAdapter = (
     startTimeoutMs = DEFAULT_START_TIMEOUT_MS,
   }: CliAdapterOptions
 ): RuntimeAdapter => {
-  const run = (command: string, args: string[]) =>
+  const snapshots = new Map<string, RunRequest>(),
+    deliver = async (
+      name: RuntimeName,
+      containerId: string,
+      request: RunRequest,
+      restarting = false
+    ) => {
+      try {
+        const command = [
+            "exec",
+            "-i",
+            containerId,
+            "node",
+            "-e",
+            DEVELOPMENT_TRANSPORT,
+          ],
+          canary = `sauce-probe-${randomUUID()}`,
+          probe = await shell.run(name, command, {
+            input: JSON.stringify({ canary, probe: true }),
+            timeoutMs: commandTimeoutMs,
+          }),
+          inspected = await run(name, ["inspect", containerId]);
+        if (probe.stdout !== "ready" || inspected.stdout.includes(canary)) {
+          throw new Error();
+        }
+        const environment = { ...request.environment };
+        if (restarting) {
+          delete environment.NODE_AUTH_TOKEN;
+        }
+        const response = await shell.run(name, command, {
+          input: JSON.stringify({
+            environment,
+            port: request.port,
+            ...request.development,
+            ...(restarting ? { installCommand: "" } : {}),
+          }),
+          timeoutMs: BUILD_TIMEOUT_MS,
+        });
+        if (response.stdout === "installation-failed") {
+          throw new Error("installation-failed");
+        }
+        if (response.stdout !== "started") {
+          throw new Error();
+        }
+      } catch (error) {
+        // No child output, payload or original error may escape this boundary.
+        // oxlint-disable-next-line preserve-caught-error -- Causes can contain credentials in runtime output.
+        throw new Error(
+          error instanceof Error && error.message === "installation-failed"
+            ? "Dependency installation failed. Check the installation command and NODE_AUTH_TOKEN. Raw logs are suppressed."
+            : `Could not securely start the development server with ${name}. Check runtime support for interactive exec and the development command. Raw logs are suppressed.`
+        );
+      }
+    },
+    run = (command: string, args: string[]) =>
       shell.run(command, args, { timeoutMs: commandTimeoutMs }),
     installedVersion = async (
       name: RuntimeName
@@ -196,6 +256,9 @@ export const createCliRuntimeAdapter = (
         .filter((line) => line !== "");
     },
     removeContainers: async (name, containerIds) => {
+      for (const id of containerIds) {
+        snapshots.delete(`${name}:${id}`);
+      }
       if (containerIds.length === 0) {
         return;
       }
@@ -206,12 +269,20 @@ export const createCliRuntimeAdapter = (
     removeImages: async (name, label) => {
       await run(name, ["image", "prune", "-af", "--filter", `label=${label}`]);
     },
-    runContainer: async (name, { environment, image, labels, port }) => {
+    runContainer: async (name, request) => {
+      const { environment, image, labels, port, development } = request;
+      if (!development && Object.keys(environment).length > 0) {
+        throw new Error(
+          "Credential delivery requires the development launcher."
+        );
+      }
       const { stdout } = await shell.run(
           name,
           [
             "run",
             "-d",
+            "--log-driver",
+            "none",
             ...HARDENING,
             "-p",
             `127.0.0.1::${port}`,
@@ -219,21 +290,33 @@ export const createCliRuntimeAdapter = (
               "-l",
               `${key}=${value}`,
             ]),
-            // Names only: values travel through the child environment, never the argument list.
-            ...Object.keys(environment).flatMap((key) => ["-e", key]),
             image,
           ],
-          { environment, timeoutMs: commandTimeoutMs }
+          { timeoutMs: commandTimeoutMs }
         ),
-        containerId = stdout.trim(),
-        published = await run(name, ["port", containerId, `${port}/tcp`]),
-        hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
-      if (Number.isNaN(hostPort)) {
-        throw new TypeError(
-          `Could not find the host port for container ${containerId}: ${published.stdout.trim()}`
-        );
+        containerId = stdout.trim();
+      try {
+        const published = await run(name, ["port", containerId, `${port}/tcp`]),
+          hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
+        if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65_535) {
+          throw new Error("Could not find the Instance host port.");
+        }
+        if (development) {
+          await deliver(name, containerId, request);
+          snapshots.set(`${name}:${containerId}`, {
+            ...request,
+            environment: { ...environment },
+          });
+        }
+        return { containerId, hostPort };
+      } catch (error) {
+        await shell
+          .run(name, ["rm", "-f", containerId], {
+            timeoutMs: LIFECYCLE_TIMEOUT_MS,
+          })
+          .catch(() => {});
+        throw error;
       }
-      return { containerId, hostPort };
     },
     start: async (name) => {
       const { command, hint } = startPlan(name, {
@@ -256,12 +339,38 @@ export const createCliRuntimeAdapter = (
       }
     },
     startContainers: async (name, containerIds) => {
+      for (const containerId of containerIds) {
+        if (!snapshots.has(`${name}:${containerId}`)) {
+          throw new Error(
+            "This Instance has no in-memory configuration. Run a new Comparison."
+          );
+        }
+      }
       if (containerIds.length === 0) {
         return;
       }
       await shell.run(name, ["start", ...containerIds], {
         timeoutMs: LIFECYCLE_TIMEOUT_MS,
       });
+      try {
+        await Promise.all(
+          containerIds.map((containerId) =>
+            deliver(
+              name,
+              containerId,
+              snapshots.get(`${name}:${containerId}`)!,
+              true
+            )
+          )
+        );
+      } catch (error) {
+        await shell
+          .run(name, ["stop", ...containerIds], {
+            timeoutMs: LIFECYCLE_TIMEOUT_MS,
+          })
+          .catch(() => {});
+        throw error;
+      }
     },
     stopContainers: async (name, containerIds) => {
       if (containerIds.length === 0) {

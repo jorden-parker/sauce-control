@@ -24,8 +24,8 @@ const request = () => ({
   configWith = (
     overrides: Partial<Pick<RepositoryConfig, "crawl" | "pages">>
   ): RepositoryConfig => ({
-    buildCommand: "",
     crawl: DEFAULT_CRAWL_LIMITS,
+    installCommand: "",
     pages: { added: [], removed: [] },
     port: 3000,
     startCommand: "",
