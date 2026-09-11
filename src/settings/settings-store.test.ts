@@ -40,3 +40,28 @@ describe("settings store Container Runtime", () => {
     expect(second.getContainerRuntime()).toBe("podman");
   });
 });
+
+describe("settings store Comparison selection", () => {
+  it("has no selection before one is saved", () => {
+    const store = openSettingsStore(freshDatabasePath());
+    expect(store.getComparisonSelection()).toBeUndefined();
+  });
+
+  it("returns the saved selection after reopening the same file", () => {
+    const path = freshDatabasePath(),
+      first = openSettingsStore(path);
+    first.saveComparisonSelection({
+      baseBranch: "release/2026-09",
+      repository: "web-app",
+      targetBranch: "feature/login",
+    });
+    first.close();
+
+    const second = openSettingsStore(path);
+    expect(second.getComparisonSelection()).toEqual({
+      baseBranch: "release/2026-09",
+      repository: "web-app",
+      targetBranch: "feature/login",
+    });
+  });
+});
