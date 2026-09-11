@@ -18,6 +18,8 @@ export default defineConfig({
       SAUCE_CONTROL_GITHUB: "stub",
     },
     reuseExistingServer: false,
+    stderr: "ignore",
+    stdout: "ignore",
     url: `http://127.0.0.1:${PORT}/settings`,
   },
 });
