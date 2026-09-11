@@ -1,6 +1,8 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeAdapter } from "@/container-runtime/runtime";
+import { loadRuntimeChoice } from "@/container-runtime/runtime-choice";
+import type { RuntimeName } from "@/container-runtime/runtime-status";
 import { gitHubToken } from "@/github/github";
 import { currentSessionId } from "@/instance/current-session";
 import { keychain } from "@/keychain";
@@ -46,16 +48,34 @@ let status: ComparisonStatus = { kind: "idle" },
 
 export const currentComparison = (): ComparisonStatus => status;
 
+/**
+ * The saved Container Runtime, or the only installed one, which ADR 0001 says is used silently
+ * and remembered. Detection runs once: after that the saved name answers without shelling out.
+ */
+const chosenContainerRuntime = async (): Promise<RuntimeName | undefined> => {
+  const store = settings(),
+    saved = store.getContainerRuntime();
+  if (saved !== undefined) {
+    return saved;
+  }
+  const choice = await loadRuntimeChoice(runtimeAdapter);
+  if (choice.kind !== "use") {
+    return undefined;
+  }
+  store.saveContainerRuntime(choice.runtime.name);
+  return choice.runtime.name;
+};
+
 /** Whether Run can be pressed: a Container Runtime is chosen (or the runner is stubbed). */
-export const canRunComparison = (): boolean =>
-  useStub() || settings().getContainerRuntime() !== undefined;
+export const canRunComparison = async (): Promise<boolean> =>
+  useStub() || (await chosenContainerRuntime()) !== undefined;
 
 /** Everything the runner needs, gathered from settings, the keychain, and the GitHub credential. */
 const gather = async () => {
   const store = settings(),
     selection = store.getComparisonSelection(),
     organisation = store.getOrganisation(),
-    runtime = store.getContainerRuntime(),
+    runtime = await chosenContainerRuntime(),
     token = await gitHubToken();
   if (selection === undefined) {
     throw new Error("Save a Comparison first.");

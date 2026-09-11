@@ -104,10 +104,14 @@ export const createCliRuntimeAdapter = (
         throw error;
       }
     },
-    /** `info` talks to the daemon or VM, so it only succeeds when the runtime is running. */
+    /**
+     * `info` talks to the daemon or VM, so it only succeeds when the runtime is running.
+     * No `--format`: docker's `.ServerVersion` field does not exist in podman's info, and a
+     * template that fails to evaluate exits non-zero even when the machine is up.
+     */
     isRunning = async (name: RuntimeName): Promise<boolean> => {
       try {
-        await run(name, ["info", "--format", "{{.ServerVersion}}"]);
+        await run(name, ["info"]);
         return true;
       } catch {
         return false;

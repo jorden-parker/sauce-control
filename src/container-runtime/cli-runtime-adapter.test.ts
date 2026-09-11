@@ -54,7 +54,7 @@ const fakeShell = ({
 describe("CLI adapter detection", () => {
   it("treats a docker info that hangs as stopped instead of hanging the page", async () => {
     const shell = fakeShell({
-        hang: ["docker info --format {{.ServerVersion}}"],
+        hang: ["docker info"],
         outputs: { "docker --version": "Docker version 29.7.2, build a7dcaa6" },
       }),
       adapter = createCliRuntimeAdapter(shell, {
@@ -66,6 +66,25 @@ describe("CLI adapter detection", () => {
       name: "docker",
       running: false,
       version: "29.7.2",
+    });
+  });
+});
+
+describe("CLI adapter detection of podman", () => {
+  it("reports a running podman machine as running", async () => {
+    // Podman info has no ServerVersion field, so the docker-only format template fails.
+    const shell = fakeShell({
+        outputs: {
+          "podman --version": "podman version 5.6.0\n",
+          "podman info": "host:\n  arch: arm64\n",
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await expect(adapter.detect("podman")).resolves.toEqual({
+      installed: true,
+      name: "podman",
+      running: true,
+      version: "5.6.0",
     });
   });
 });

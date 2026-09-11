@@ -35,7 +35,8 @@ export default async function ComparePage() {
         ? await client.listRepositories(organisation)
         : [],
     saved = settings().getComparisonSelection(),
-    status = currentComparison();
+    status = currentComparison(),
+    canRun = await canRunComparison();
 
   return (
     <main className="mx-auto w-full max-w-6xl p-8">
@@ -77,10 +78,12 @@ export default async function ComparePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ComparisonStatusPanel
-                canRun={canRunComparison()}
-                status={status}
-              />
+              {canRun ? null : (
+                <div className="mb-3">
+                  <Blocker>Choose a Container Runtime first.</Blocker>
+                </div>
+              )}
+              <ComparisonStatusPanel canRun={canRun} status={status} />
             </CardContent>
           </Card>
         )}
