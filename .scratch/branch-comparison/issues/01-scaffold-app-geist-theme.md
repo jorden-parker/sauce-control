@@ -4,10 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] Next.js App Router application with shadcn/ui components themed with Geist tokens and the Geist font
-- [ ] SQLite persistence and an OS keychain wrapper are available to later tickets
-- [ ] All listening sockets bind `127.0.0.1` only
-- [ ] Settings page saves the Organisation and reloads it after restart
+- [x] Next.js App Router application with shadcn/ui components themed with Geist tokens and the Geist font
+- [x] SQLite persistence and an OS keychain wrapper are available to later tickets
+- [x] All listening sockets bind `127.0.0.1` only
+- [x] Settings page saves the Organisation and reloads it after restart
 - [ ] Playwright UI test covers saving and reloading the Organisation
+
+## Comments
+
+2026-09-11: Implemented. Tests cover the settings store (SQLite via `node:sqlite`) and the keychain wrapper (through a fake adapter); the OS adapter uses `@napi-rs/keyring`. Loopback binding is enforced by `-H 127.0.0.1` in the dev and start scripts. Manually verified: saved an Organisation in the browser, restarted `next start`, value reloaded.
