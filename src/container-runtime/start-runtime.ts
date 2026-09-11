@@ -7,12 +7,6 @@ export interface StartOptions {
   timeoutMs: number;
 }
 
-/** How a reviewer starts each runtime by hand, for error messages. */
-export const MANUAL_START_HINT: Record<RuntimeName, string> = {
-  docker: "Start Docker (Docker Desktop, or `colima start`)",
-  podman: "Run `podman machine start`",
-};
-
 const isRunning = (status: RuntimeStatus): boolean =>
   status.installed && status.running;
 
@@ -28,7 +22,7 @@ export const startRuntime = async (
   while (!isRunning(status)) {
     if (Date.now() >= deadline) {
       throw new Error(
-        `${name} did not become ready within ${timeoutMs}ms. ${MANUAL_START_HINT[name]} and try again.`
+        `${name} did not become ready within ${timeoutMs}ms. Check it is running and try again.`
       );
     }
     // oxlint-disable-next-line no-await-in-loop -- readiness polling is sequential by nature

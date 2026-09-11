@@ -8,7 +8,11 @@ import type { RuntimeName } from "@/container-runtime/runtime-status";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 /** In-memory Container Runtimes: docker installed and stopped, podman absent. */
-const fake: RuntimeAdapter & { running: boolean; starts: RuntimeName[] } = {
+const fake: RuntimeAdapter & {
+  running: boolean;
+  startError?: string;
+  starts: RuntimeName[];
+} = {
   detect: (name) =>
     Promise.resolve(
       name === "docker"
@@ -18,6 +22,9 @@ const fake: RuntimeAdapter & { running: boolean; starts: RuntimeName[] } = {
   running: false,
   start: (name) => {
     fake.starts.push(name);
+    if (fake.startError !== undefined) {
+      return Promise.reject(new Error(fake.startError));
+    }
     fake.running = true;
     return Promise.resolve();
   },
@@ -62,10 +69,35 @@ describe("startContainerRuntime action", () => {
       settings = await import("@/settings/settings");
     settings.settings().saveContainerRuntime("podman");
 
-    await actions.startContainerRuntime(form({ runtime: "docker" }));
+    const result = await actions.startContainerRuntime(
+      {},
+      form({ runtime: "docker" })
+    );
 
+    expect(result).toEqual({});
     expect(fake.starts).toEqual(["docker"]);
     expect(fake.running).toBe(true);
     expect(settings.settings().getContainerRuntime()).toBe("docker");
+  });
+});
+
+describe("startContainerRuntime action when the start fails", () => {
+  it("returns the error for the page to show and leaves the choice alone", async () => {
+    const actions = await import("./actions"),
+      settings = await import("@/settings/settings");
+    settings.settings().saveContainerRuntime("podman");
+    fake.startError =
+      "Could not start docker with `open -a Docker`. Open Docker and try again.";
+
+    const result = await actions.startContainerRuntime(
+      {},
+      form({ runtime: "docker" })
+    );
+
+    expect(result).toEqual({
+      error:
+        "Could not start docker with `open -a Docker`. Open Docker and try again.",
+    });
+    expect(settings.settings().getContainerRuntime()).toBe("podman");
   });
 });

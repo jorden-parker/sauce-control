@@ -59,7 +59,7 @@ describe("a Container Runtime that never becomes ready", () => {
     await expect(
       startRuntime(adapter, "podman", { pollIntervalMs: 1, timeoutMs: 20 })
     ).rejects.toThrow(
-      "podman did not become ready within 20ms. Run `podman machine start` and try again."
+      "podman did not become ready within 20ms. Check it is running and try again."
     );
   });
 

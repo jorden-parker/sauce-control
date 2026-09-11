@@ -17,3 +17,5 @@
 ## Comments
 
 2026-09-11: Implemented test-first. Domain rules in `src/container-runtime/runtime-choice.ts` (four ADR 0001 rules plus "nothing installed"), start-and-wait in `start-runtime.ts` with a manual-start hint on timeout, real CLI adapter in `cli-runtime-adapter.ts` with a detection-only smoke test. Settings store persists the choice; server actions save and start; the Settings page card covers all four states. Starting Docker uses `open -a Docker` on macOS and `systemctl start docker` elsewhere; neither has been exercised end to end on a real machine yet.
+
+2026-09-11 (later): Portability pass. Start commands now come from a platform and docker-context table (`start-command.ts`): Colima, OrbStack, Rancher Desktop, and Docker Desktop on macOS; Podman machine on macOS and Windows; Linux Docker and Windows Docker are hint-only (no automatic start). Every CLI call has a 10s timeout so a wedged daemon reports "stopped" instead of hanging the page. Start failures return a message that the Settings card renders next to the button instead of throwing. Verified Colima start end to end on macOS; Linux and Windows paths are covered by unit tests only.

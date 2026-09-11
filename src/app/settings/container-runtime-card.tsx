@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import type { RuntimeChoice } from "@/container-runtime/runtime-choice";
 import type { InstalledRuntime } from "@/container-runtime/runtime-status";
 import { saveContainerRuntime, startContainerRuntime } from "./actions";
+import { StartRuntimeForm } from "./start-runtime-form";
 
 const describe = ({ name, running, version }: InstalledRuntime): string =>
     `${name} ${version}, ${running ? "running" : "stopped"}`,
@@ -36,18 +37,12 @@ const describe = ({ name, running, version }: InstalledRuntime): string =>
       </Button>
     </form>
   ),
-  StartButton = ({ runtime }: { runtime: InstalledRuntime }) => (
-    <form action={startContainerRuntime}>
-      <input type="hidden" name="runtime" value={runtime.name} />
-      <Button type="submit" variant="outline">
-        Start {runtime.name}
-      </Button>
-    </form>
-  ),
   InUse = ({ runtime }: { runtime: InstalledRuntime }) => (
     <div className="flex flex-col gap-3">
       <p className="text-sm">Using {describe(runtime)}</p>
-      {runtime.running ? null : <StartButton runtime={runtime} />}
+      {runtime.running ? null : (
+        <StartRuntimeForm action={startContainerRuntime} runtime={runtime} />
+      )}
     </div>
   ),
   SavedMissing = ({

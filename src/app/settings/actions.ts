@@ -28,14 +28,25 @@ export const saveContainerRuntime = async (
 
 const START_OPTIONS = { pollIntervalMs: 1000, timeoutMs: 120_000 };
 
+/** Outcome of a start attempt, rendered by the Settings page. */
+export interface StartResult {
+  error?: string;
+}
+
 export const startContainerRuntime = async (
+  _previous: StartResult,
   formData: FormData
-): Promise<void> => {
+): Promise<StartResult> => {
   const runtime = String(formData.get("runtime") ?? "");
   if (!isRuntimeName(runtime)) {
-    return;
+    return { error: `Unknown runtime: ${runtime}` };
   }
-  await startRuntime(runtimeAdapter, runtime, START_OPTIONS);
+  try {
+    await startRuntime(runtimeAdapter, runtime, START_OPTIONS);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
   settings().saveContainerRuntime(runtime);
   revalidatePath("/settings");
+  return {};
 };
