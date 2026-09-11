@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { runtimeAdapter } from "@/container-runtime/runtime";
 import { loadRuntimeChoice } from "@/container-runtime/runtime-choice";
 import type { RuntimeName } from "@/container-runtime/runtime-status";
+import { endpointRecordings } from "@/endpoints/endpoint-recordings";
 import { gitHubToken } from "@/github/github";
 import { currentSessionId } from "@/instance/current-session";
 import { keychain } from "@/keychain";
@@ -134,12 +135,16 @@ export const startCurrentComparison = async (): Promise<void> => {
         ? runComparison(
             {
               git: nodeCommandRunner,
+              recordings: endpointRecordings(),
               requestLog: gitHubRequestLog(),
               runtime: runtimeAdapter,
             },
             { ...request, workDirectory }
           )
-        : runStubComparison();
+        : runStubComparison({
+            recordings: endpointRecordings(),
+            repository: request.repository,
+          });
     run
       .then(async (comparison) => {
         running = comparison;

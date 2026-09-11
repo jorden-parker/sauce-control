@@ -16,7 +16,7 @@ const shell = (title: string, body: string): string => `<!doctype html>
       : `<footer class="links"><a href="/about">About</a></footer>`,
   deleteButton = (role: InstanceRole): string =>
     role === "base" ? `<button data-testid="delete">Delete</button>` : "",
-  home = (role: InstanceRole): string =>
+  home = (role: InstanceRole, apiOrigin: string): string =>
     shell(
       `Home (${role})`,
       `<h1>Home (${role})</h1>
@@ -36,6 +36,7 @@ ${deleteButton(role)}
   var showPath = function () { echo("path-echo", location.pathname); };
   document.getElementById("open-panel").addEventListener("click", function () { history.pushState({}, "", "/panel"); showPath(); });
   window.addEventListener("popstate", showPath);
+  fetch("${apiOrigin}/users/7").catch(function () {});
 </script>`
     ),
   about = (role: InstanceRole): string =>
@@ -44,14 +45,15 @@ ${deleteButton(role)}
       `<h1>About (${role})</h1><nav><a href="/">Home</a></nav>`
     );
 
-/** The fixture page for a path, or undefined for a 404. */
+/** The fixture page for a path, or undefined for a 404. Home calls the fixture API at `apiOrigin` on load. */
 export const syncAppPage = (
   role: InstanceRole,
-  path: string
+  path: string,
+  apiOrigin: string
 ): string | undefined => {
   const pathname = path.split("?")[0];
   if (pathname === "/" || pathname === "/panel") {
-    return home(role);
+    return home(role, apiOrigin);
   }
   if (pathname === "/about") {
     return about(role);

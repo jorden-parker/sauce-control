@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DeviceFrame } from "@/components/device-frame";
-import { INSTANCE_ROLES, type InstanceRole } from "@/proxy/proxy";
+import { INSTANCE_ROLES, type InstanceRole } from "@/proxy/instance-role";
 import type { SyncEvent, SyncMessage } from "@/sync/sync-script";
 import { DEFAULT_VIEWPORT } from "@/viewport/viewport";
 

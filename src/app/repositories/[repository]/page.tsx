@@ -16,7 +16,9 @@ import {
 import { settings } from "@/settings/settings";
 import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
+import { endpointRecordings } from "@/endpoints/endpoint-recordings";
 import { ConfigForm } from "./config-form";
+import { EndpointsCard } from "./endpoints-card";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +95,12 @@ export default async function RepositoryConfigPage({
           />
         </CardContent>
       </Card>
+      <div className="mt-6">
+        <EndpointsCard
+          endpoints={endpointRecordings().endpoints(repository)}
+          repository={repository}
+        />
+      </div>
       <p className="mt-6 text-sm">
         <Link href="/compare" className="underline">
           Back to Compare

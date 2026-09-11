@@ -6,8 +6,10 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createContext, runInContext } from "node:vm";
-import { afterEach, describe, expect, it } from "vitest";
-import { type Proxy, startProxy } from "./proxy";
+import { type Browser, chromium } from "playwright";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { openEndpointRecordings } from "@/endpoints/endpoint-recordings";
+import { type Proxy, type ProxyRequest, startProxy } from "./proxy";
 
 type Handler = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -33,9 +35,11 @@ const open: { close: () => Promise<void> }[] = [],
       });
     }),
   startAll = async (
-    handlers: { base?: Handler; target?: Handler } = {}
+    handlers: { base?: Handler; target?: Handler } = {},
+    options: Pick<ProxyRequest, "localEndpointOrigins" | "recordEndpoint"> = {}
   ): Promise<Proxy> => {
     const proxy = await startProxy({
+      ...options,
       instances: {
         base: { hostPort: await listenUpstream("base", handlers.base) },
         target: { hostPort: await listenUpstream("target", handlers.target) },
@@ -215,5 +219,231 @@ describe("one cookie jar for both Instances", () => {
     await expect(
       (await fetch(`${proxy.urlFor("base")}profile`)).text()
     ).resolves.toBe("cookie: (none)");
+  });
+});
+
+/** A fixture upstream serving a page that runs `script` and shows its outcome in `#result`. */
+const pageRunning =
+    (script: string): Handler =>
+    (_request, response) => {
+      response.setHeader("content-type", "text/html; charset=utf-8");
+      response.end(
+        `<!doctype html><html><head></head><body><p id="result"></p><script>
+var show = function (text) { document.getElementById("result").textContent = text; };
+${script}
+</script></body></html>`
+      );
+    },
+  /** A fixture external API on its own port, so it is cross-origin to every Instance. */
+  listenApi = (handler: Handler): Promise<string> =>
+    listenUpstream("api", handler).then((port) => `http://127.0.0.1:${port}`),
+  json =
+    (body: unknown): Handler =>
+    (_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(body));
+    };
+
+describe("recording Endpoints", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  });
+
+  afterAll(async () => {
+    await browser.close();
+  });
+
+  /** Opens one Instance through the Proxy in a real browser and returns what its script showed. */
+  const resultOf = async (url: string): Promise<string> => {
+    const tab = await browser.newPage();
+    try {
+      await tab.goto(url);
+      const result = tab.locator("#result");
+      await result.filter({ hasText: /./u }).waitFor({ timeout: 5000 });
+      return (await result.textContent()) ?? "";
+    } finally {
+      await tab.close();
+    }
+  };
+
+  it("answers a page's cross-origin fetch through the Proxy and records the Endpoint", async () => {
+    const api = await listenApi(json({ id: 7, name: "Ada" })),
+      recordings = openEndpointRecordings(":memory:"),
+      proxy = await startAll(
+        {
+          base: pageRunning(
+            `fetch("${api}/users/7").then(function (r) { return r.text(); }).then(show, function (e) { show("failed: " + e); });`
+          ),
+        },
+        {
+          localEndpointOrigins: [api],
+          recordEndpoint: (call) => recordings.record("web-app", call),
+        }
+      );
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe(
+      '{"id":7,"name":"Ada"}'
+    );
+    expect(recordings.endpoints("web-app")).toEqual([
+      { method: "GET", origin: api, pathPattern: "/users/{n}", samples: 1 },
+    ]);
+  });
+
+  it("passes the page's Authorization to the Endpoint but stores no credential", async () => {
+    const api = await listenApi((request, response) => {
+        response.setHeader("set-cookie", "api_session=set-cookie-secret");
+        response.end(`saw ${request.headers.authorization ?? "(none)"}`);
+      }),
+      recordings = openEndpointRecordings(":memory:"),
+      proxy = await startAll(
+        {
+          base: pageRunning(
+            `document.cookie = "session=cookie-secret";
+fetch("${api}/me", { credentials: "include", headers: { Authorization: "Bearer secret-token" } })
+  .then(function (r) { return r.text(); }).then(show, function (e) { show("failed: " + e); });`
+          ),
+        },
+        {
+          localEndpointOrigins: [api],
+          recordEndpoint: (call) => recordings.record("web-app", call),
+        }
+      );
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe(
+      "saw Bearer secret-token"
+    );
+    const [sample] = recordings.samples("web-app"),
+      stored = JSON.stringify([
+        sample?.requestHeaders,
+        sample?.responseHeaders,
+      ]);
+    expect(sample?.requestHeaders.authorization).toBe("[redacted]");
+    expect(sample?.responseHeaders["set-cookie"]).toBe("[redacted]");
+    for (const secret of [
+      "secret-token",
+      "cookie-secret",
+      "set-cookie-secret",
+    ]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
+  it("refuses to relay a call to a local address it was not told about", async () => {
+    let reached = 0;
+    const local = await listenUpstream(
+        "local service",
+        (_request, response) => {
+          reached += 1;
+          response.end("secret");
+        }
+      ),
+      recordings = openEndpointRecordings(":memory:"),
+      proxy = await startAll(
+        {
+          base: pageRunning(
+            `Promise.all([
+  "http://127.0.0.1:${local}/admin",
+  "http://localhost:${local}/admin",
+  "http://[::ffff:127.0.0.1]:${local}/admin"
+].map(function (url) {
+  return fetch(url).then(function (r) { return r.status; }, function () { return "failed"; });
+})).then(function (statuses) { show(statuses.join(" ")); });`
+          ),
+        },
+        { recordEndpoint: (call) => recordings.record("web-app", call) }
+      );
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe("403 403 403");
+    expect(reached).toBe(0);
+    expect(recordings.samples("web-app")).toEqual([]);
+  });
+
+  it("follows an Endpoint's redirect back through the Proxy, recording each hop", async () => {
+    const api = await listenApi((request, response) => {
+        if (request.url === "/old") {
+          response.writeHead(302, {
+            location: `http://127.0.0.1:${request.socket.localPort}/users/7`,
+          });
+          response.end();
+          return;
+        }
+        json({ id: 7 })(request, response);
+      }),
+      recordings = openEndpointRecordings(":memory:"),
+      proxy = await startAll(
+        {
+          base: pageRunning(
+            `fetch("${api}/old").then(function (r) { return r.text(); }).then(show, function (e) { show("failed: " + e); });`
+          ),
+        },
+        {
+          localEndpointOrigins: [api],
+          recordEndpoint: (call) => recordings.record("web-app", call),
+        }
+      );
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe('{"id":7}');
+    expect(
+      recordings.samples("web-app").map(({ status, url }) => `${status} ${url}`)
+    ).toEqual([`302 ${api}/old`, `200 ${api}/users/7`]);
+  });
+
+  it("still answers the page when recording the call fails", async () => {
+    const api = await listenApi(json({ id: 7 })),
+      proxy = await startAll(
+        {
+          base: pageRunning(
+            `fetch("${api}/users/7").then(function (r) { return r.text(); }).then(show, function (e) { show("failed: " + e); });`
+          ),
+        },
+        {
+          localEndpointOrigins: [api],
+          recordEndpoint: () => {
+            throw new Error("database is locked");
+          },
+        }
+      );
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe('{"id":7}');
+    await expect(resultOf(proxy.urlFor("base"))).resolves.toBe('{"id":7}');
+  });
+
+  it("records an XMLHttpRequest from the Target Instance with the body it sent", async () => {
+    const api = await listenApi((request, response) => {
+        let body = "";
+        request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        request.on("end", () => {
+          response.statusCode = 201;
+          response.end(`${request.method} ${body}`);
+        });
+      }),
+      recordings = openEndpointRecordings(":memory:"),
+      proxy = await startAll(
+        {
+          target: pageRunning(
+            `var xhr = new XMLHttpRequest();
+xhr.open("POST", "${api}/users");
+xhr.setRequestHeader("content-type", "application/json");
+xhr.onload = function () { show(xhr.status + " " + xhr.responseText); };
+xhr.onerror = function () { show("failed"); };
+xhr.send('{"name":"Ada"}');`
+          ),
+        },
+        {
+          localEndpointOrigins: [api],
+          recordEndpoint: (call) => recordings.record("web-app", call),
+        }
+      );
+    await expect(resultOf(proxy.urlFor("target"))).resolves.toBe(
+      '201 POST {"name":"Ada"}'
+    );
+    const [sample] = recordings.samples("web-app");
+    expect(sample).toMatchObject({
+      method: "POST",
+      role: "target",
+      status: 201,
+      url: `${api}/users`,
+    });
+    expect(Buffer.from(sample!.requestBody).toString()).toBe('{"name":"Ada"}');
+    expect(Buffer.from(sample!.responseBody).toString()).toBe(
+      'POST {"name":"Ada"}'
+    );
   });
 });

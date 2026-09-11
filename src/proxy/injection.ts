@@ -36,6 +36,44 @@ export const determinismScript = ({
 })();
 `;
 
+/** Where the Proxy answers an Endpoint call on behalf of the page; the target URL is in `url`. */
+export const ENDPOINT_ROUTE = "/__sauce-control/endpoint";
+
+/**
+ * Sends every cross-origin `fetch` and `XMLHttpRequest` through the Proxy's own origin, so the
+ * Proxy sees each Endpoint call. Same-origin requests are the application's own routes and go
+ * straight through.
+ */
+export const endpointScript = `
+(function () {
+  var route = location.origin + "${ENDPOINT_ROUTE}?url=";
+  function reroute(input) {
+    var url;
+    try { url = new URL(input, document.baseURI); } catch (error) { return undefined; }
+    if (url.origin === location.origin || (url.protocol !== "http:" && url.protocol !== "https:")) { return undefined; }
+    return route + encodeURIComponent(url.href);
+  }
+  if (typeof fetch === "function") {
+    var realFetch = fetch.bind(globalThis);
+    globalThis.fetch = function (input, init) {
+      var isRequest = typeof Request === "function" && input instanceof Request;
+      var routed = reroute(isRequest ? input.url : String(input));
+      if (routed === undefined) { return realFetch(input, init); }
+      return realFetch(isRequest ? new Request(routed, input) : routed, init);
+    };
+  }
+  if (typeof XMLHttpRequest === "function") {
+    var realOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      var args = Array.prototype.slice.call(arguments);
+      var routed = reroute(String(url));
+      if (routed !== undefined) { args[1] = routed; }
+      return realOpen.apply(this, args);
+    };
+  }
+})();
+`;
+
 export const animationStylesheet = `
 *, *::before, *::after {
   animation: none !important;
@@ -50,7 +88,8 @@ export const injectIntoHtml = (html: string, injection: Injection): string => {
   const block =
       `<script data-sauce-control="determinism">${determinismScript(injection)}</script>` +
       `<style data-sauce-control="animations">${animationStylesheet}</style>` +
-      `<script data-sauce-control="sync">${syncScriptSource()}</script>`,
+      `<script data-sauce-control="sync">${syncScriptSource()}</script>` +
+      `<script data-sauce-control="endpoints">${endpointScript}</script>`,
     head = /<head[^>]*>/iu.exec(html);
   return head
     ? html.slice(0, head.index + head[0].length) +

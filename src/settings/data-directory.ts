@@ -15,3 +15,6 @@ export const settingsDatabasePath = (): string =>
 
 export const gitHubRequestsDatabasePath = (): string =>
   join(dataDirectory(), "github-requests.db");
+
+export const endpointRecordingsDatabasePath = (): string =>
+  join(dataDirectory(), "endpoint-recordings.db");

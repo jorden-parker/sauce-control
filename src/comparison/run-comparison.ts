@@ -1,3 +1,4 @@
+import type { EndpointRecordings } from "@/endpoints/endpoint-recordings";
 import {
   type Instance,
   type InstanceDependencies,
@@ -11,6 +12,11 @@ export interface ComparisonRequest extends Omit<InstanceRequest, "branch"> {
   targetBranch: string;
 }
 
+export interface ComparisonDependencies extends InstanceDependencies {
+  /** Where the Endpoint calls of both Instances are recorded, under the Comparison's Repository. */
+  recordings?: EndpointRecordings;
+}
+
 /** Both Instances of a Comparison, up and reachable through the Proxy. */
 export interface RunningComparison {
   base: Instance;
@@ -22,10 +28,10 @@ export interface RunningComparison {
 
 /** Builds and starts both branches concurrently, then fronts them with one Proxy. */
 export const runComparison = async (
-  dependencies: InstanceDependencies,
+  dependencies: ComparisonDependencies,
   { baseBranch, targetBranch, ...shared }: ComparisonRequest
 ): Promise<RunningComparison> => {
-  const { runtime } = dependencies,
+  const { recordings, runtime } = dependencies,
     removeAll = (instances: Instance[]) =>
       runtime.removeContainers(
         shared.runtime,
@@ -46,7 +52,15 @@ export const runComparison = async (
   }
   const [base, target] = started as [Instance, Instance],
     // The Instances themselves, so a restarted container's new host port reaches the Proxy.
-    proxy = await startProxy({ instances: { base, target } });
+    proxy = await startProxy({
+      instances: { base, target },
+      ...(recordings === undefined
+        ? {}
+        : {
+            recordEndpoint: (call) =>
+              recordings.record(shared.repository, call),
+          }),
+    });
   return {
     base,
     proxy,

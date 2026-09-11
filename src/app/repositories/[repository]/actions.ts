@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { endpointRecordings } from "@/endpoints/endpoint-recordings";
 import { keychain } from "@/keychain";
 import {
   parseEnvironment,
@@ -52,5 +53,17 @@ export const saveRepositoryConfig = async (
   if (pasted.trim() !== "") {
     saveEnvironment(keychain, repository, parseEnvironment(pasted));
   }
+  revalidatePath(`/repositories/${repository}`);
+};
+
+/** Deletes every Endpoint call recorded for the Repository. */
+export const purgeEndpointRecordings = async (
+  formData: FormData
+): Promise<void> => {
+  const repository = String(formData.get("repository") ?? "").trim();
+  if (repository === "") {
+    return;
+  }
+  endpointRecordings().purge(repository);
   revalidatePath(`/repositories/${repository}`);
 };
