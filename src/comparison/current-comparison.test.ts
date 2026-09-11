@@ -36,7 +36,7 @@ const { runComparison, discoverPages, detectAffectedPages } = vi.hoisted(
       typeof import("./detect-affected-pages").detectAffectedPages
     >(async () => ({ changedFiles: [], pages: [], unattributed: [] })),
     discoverPages: vi.fn<typeof import("./discover-pages").discoverPages>(
-      async () => ({ pages: [], pageStates: [] })
+      async () => ({ pageStates: [], pages: [] })
     ),
     runComparison: vi.fn<typeof import("./run-comparison").runComparison>(
       (_deps, request) =>
@@ -93,7 +93,10 @@ describe("currentComparison", () => {
     async (withFile) => {
       const store = settings.settings(),
         file = join(process.env.SAUCE_CONTROL_DATA_DIR!, "test.env");
-      writeFileSync(file, "API_URL=https://example.test\n");
+      writeFileSync(
+        file,
+        "API_URL=https://example.test\nNODE_AUTH_TOKEN=synthetic-install-token\n"
+      );
       store.saveOrganisation("example");
       store.saveComparisonSelection({
         baseBranch: "main",
@@ -118,7 +121,12 @@ describe("currentComparison", () => {
             port: 3000,
             startCommand: "",
           },
-          environment: withFile ? { API_URL: "https://example.test" } : {},
+          environment: withFile
+            ? {
+                API_URL: "https://example.test",
+                NODE_AUTH_TOKEN: "synthetic-install-token",
+              }
+            : {},
           repository: "web-app",
         })
       );

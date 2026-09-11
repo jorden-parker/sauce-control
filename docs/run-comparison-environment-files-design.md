@@ -1,6 +1,6 @@
 # Environment Files and development-only Comparisons
 
-Status: accepted and implemented. Docker and browser verification completed; live Podman verification remains outstanding because Podman is not installed locally. Individual interview decisions are recorded in the [research notes](./environment-files-research.md), [development-only ADR](./adr/0004-development-servers-only.md) and [credential-delivery ADR](./adr/0006-deliver-comparison-credentials-through-stdin.md).
+Status: accepted and implemented. Docker and browser verification completed. Live credential-delivery verification also passed on macOS with Podman 6.1.1. Individual interview decisions are recorded in the [research notes](./environment-files-research.md), [development-only ADR](./adr/0004-development-servers-only.md) and [credential-delivery ADR](./adr/0006-deliver-comparison-credentials-through-stdin.md).
 
 ## Agreed workflow
 
@@ -36,7 +36,7 @@ Keep `NODE_ENV=development` and the configured Instance port under Sauce Control
 
 Rename the existing build-command concept to dependency installation in configuration and UI. Revalidate saved commands instead of executing an old production workflow. Where package-manager metadata is absent, infer it from an unambiguous lockfile, otherwise use npm; contradictory metadata produces a configuration error. Inspect known production command patterns before execution without claiming static inspection can prove arbitrary repository scripts safe.
 
-Avoid copying credential inputs, repository environment files or `.git` into development images or source staging. Remove the legacy opt-in that bakes `.env.local` into an image. Do not rely on deleting copied secrets in a later layer. Keep source files read-only; store dependency outputs separately from originals. Never mount original Environment Files into Instances, which would bypass the stage-specific variable split.
+Avoid copying credential inputs, repository environment files or `.git` into development images or source staging. Remove the legacy opt-in that bakes `.env.local` into an image. Do not rely on deleting copied secrets in a later layer. Keep source files read-only; store dependency outputs separately from originals. Staged package manifests and lockfiles are writable inside the disposable container: package managers may rewrite them even when dependencies are unchanged. Original checkout files remain untouched. Never mount original Environment Files into Instances, which would bypass the stage-specific variable split.
 
 Create no on-disk credential payload files. Close delivery pipes after use. Release the Comparison snapshot when it ends or fails, and remove owned execution resources through the existing lifecycle. If Sauce Control has exited, an old container cannot resume without a new Comparison and fresh validation. Original Environment Files and previously saved keychain entries are not deleted.
 
@@ -50,7 +50,9 @@ Use synthetic credentials on Docker and Podman to verify absence from command ar
 
 Check the Geist file browser through the full selection, reorder, save, reload and run flow. Verify development script discovery, no production fallback, and ignored Repository Dockerfiles.
 
-The selected runtime must pass the delivery capability checks before receiving real credentials. Stop with actionable guidance when the required protection is unsupported; never silently weaken delivery. Podman is not currently installed in the inspected local environment, so Podman verification remains outstanding and must not be represented as passed.
+The selected runtime must pass the delivery capability checks before receiving real credentials. Stop with actionable guidance when the required protection is unsupported; never silently weaken delivery. Live tests now cover Docker and Podman 6.1.1 on macOS, including a saved file using `export NODE_AUTH_TOKEN=…`, npm installation, output suppression, inspection and restart reinjection.
+
+Installation regression: making every staged file read-only caused npm to fail with `EACCES` opening `/app/package-lock.json`, even for an offline install with no dependencies or lifecycle scripts. Making only staged package manifests and lockfiles writable fixes that failure without changing the original checkout. The live credential-delivery test now exercises npm with an existing lockfile, in addition to direct launcher delivery, so successful token transport alone cannot mask this installation failure.
 
 ## Protection boundary
 

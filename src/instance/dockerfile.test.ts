@@ -11,7 +11,8 @@ describe("generated Dockerfile", () => {
         useDotEnvLocal: false,
       })
     ).toContain('CMD ["node", "/opt/sauce-control-launcher.cjs"]');
-    expect(generateDockerfile()).not.toContain("pnpm");
+    expect(generateDockerfile()).not.toContain("pnpm install");
+    expect(generateDockerfile()).not.toContain("pnpm run dev");
   });
 
   it("never copies the entire clone or uses the legacy environment opt-in", () => {
