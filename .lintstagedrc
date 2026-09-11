@@ -1,3 +1,7 @@
 {
-  "*": "prettier --ignore-unknown --write"
+  "*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,vue,astro,svelte}": [
+    "oxlint --fix",
+    "oxfmt"
+  ],
+  "*": "oxfmt --no-error-on-unmatched-pattern"
 }
