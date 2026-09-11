@@ -102,6 +102,22 @@ describe("rewriting HTML", () => {
     );
   });
 
+  it("rewrites chunked HTML, as dev servers send it, into one sized response", async () => {
+    const proxy = await startAll({
+        base: (_request, response) => {
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "transfer-encoding": "chunked",
+          });
+          response.write("<!doctype html><html><head></head>");
+          response.end("<body>chunked</body></html>");
+        },
+      }),
+      response = await fetch(proxy.urlFor("base"));
+    expect(response.headers.get("transfer-encoding")).toBeNull();
+    await expect(response.text()).resolves.toContain("<body>chunked</body>");
+  });
+
   it("leaves non-HTML responses untouched", async () => {
     const proxy = await startAll(),
       html = await (await fetch(proxy.urlFor("base"))).text();

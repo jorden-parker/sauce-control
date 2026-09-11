@@ -3,6 +3,7 @@ import {
   type RuntimeName,
   isRuntimeName,
 } from "@/container-runtime/runtime-status";
+import { type CrawlLimits, DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 
 /** The start of a Comparison: one Repository and its two branches. */
 export interface ComparisonSelection {
@@ -11,9 +12,19 @@ export interface ComparisonSelection {
   targetBranch: string;
 }
 
+export interface ManualPages {
+  added: string[];
+  removed: string[];
+}
+
+export const DEFAULT_MANUAL_PAGES: ManualPages = { added: [], removed: [] };
+
 /** How one Repository is built and started, saved once and reused for every Comparison of it. */
 export interface RepositoryConfig {
   buildCommand: string;
+  crawl: CrawlLimits;
+  /** Pages the reviewer added or removed by hand, on top of what discovery finds. */
+  pages: ManualPages;
   port: number;
   startCommand: string;
   /** Explicit opt-in to the clone's `.env.local` instead of keychain variables only. */
@@ -40,7 +51,11 @@ const CODE_DIRECTORY_KEY = "code-directory",
   ORGANISATION_KEY = "organisation",
   repositoryConfigKey = (repository: string): string =>
     `repository-config:${repository}`,
-  isRepositoryConfig = (value: unknown): value is RepositoryConfig =>
+  /** Configs saved before crawl limits and manual Pages existed get the defaults on read. */
+  isRepositoryConfig = (
+    value: unknown
+  ): value is Omit<RepositoryConfig, "crawl" | "pages"> &
+    Partial<Pick<RepositoryConfig, "crawl" | "pages">> =>
     typeof value === "object" &&
     value !== null &&
     "buildCommand" in value &&
@@ -90,7 +105,13 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
         return;
       }
       const parsed: unknown = JSON.parse(value);
-      return isRepositoryConfig(parsed) ? parsed : undefined;
+      return isRepositoryConfig(parsed)
+        ? {
+            crawl: DEFAULT_CRAWL_LIMITS,
+            pages: DEFAULT_MANUAL_PAGES,
+            ...parsed,
+          }
+        : undefined;
     },
     saveCodeDirectory: (directory) => {
       upsert.run(CODE_DIRECTORY_KEY, directory);

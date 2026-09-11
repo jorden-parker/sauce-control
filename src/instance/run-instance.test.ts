@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { describe, expect, it } from "vitest";
 import type {
   BuildRequest,
@@ -39,7 +40,7 @@ const fakeRuntime = ({
         removeImages: () => Promise.resolve(),
         runContainer: (_name, request) => {
           runs.push(request);
-          return Promise.resolve({ containerId: "abc123", hostPort: 49152 });
+          return Promise.resolve({ containerId: "abc123", hostPort: 49_152 });
         },
         start: () => Promise.resolve(),
       };
@@ -67,6 +68,8 @@ const fakeRuntime = ({
     branch: "feature/login",
     config: {
       buildCommand: "pnpm install --frozen-lockfile",
+      crawl: DEFAULT_CRAWL_LIMITS,
+      pages: { added: [], removed: [] },
       port: 3000,
       startCommand: "pnpm run dev",
       useDotEnvLocal: false,

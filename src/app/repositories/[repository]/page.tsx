@@ -14,6 +14,8 @@ import {
   inferRepositoryConfig,
 } from "@/repository-config/infer-config";
 import { settings } from "@/settings/settings";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
+import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { ConfigForm } from "./config-form";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +62,8 @@ export default async function RepositoryConfigPage({
         : await readManifest(organisation, repository),
     config = saved ?? {
       ...inferRepositoryConfig(manifest),
+      crawl: DEFAULT_CRAWL_LIMITS,
+      pages: DEFAULT_MANUAL_PAGES,
       useDotEnvLocal: false,
     },
     environmentCount = Object.keys(

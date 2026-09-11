@@ -9,7 +9,10 @@ export const generateDockerfile = ({
   port,
   startCommand,
   useDotEnvLocal,
-}: RepositoryConfig): string =>
+}: Pick<
+  RepositoryConfig,
+  "buildCommand" | "port" | "startCommand" | "useDotEnvLocal"
+>): string =>
   [
     `FROM ${BASE_IMAGE}`,
     "WORKDIR /app",

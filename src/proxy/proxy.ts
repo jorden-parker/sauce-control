@@ -73,11 +73,18 @@ const cookieHeader = (jar: CookieJar): { cookie?: string } => {
       },
       (upstreamResponse) => {
         const status = upstreamResponse.statusCode ?? 502,
-          { "set-cookie": setCookies = [], ...headers } =
-            upstreamResponse.headers;
+          {
+            "set-cookie": setCookies = [],
+            "transfer-encoding": chunked,
+            ...headers
+          } = upstreamResponse.headers;
         jar.store(setCookies);
         if (!isHtml(upstreamResponse)) {
-          response.writeHead(status, headers);
+          // Piped through as-is, so the upstream framing still applies.
+          response.writeHead(status, {
+            ...headers,
+            ...(chunked === undefined ? {} : { "transfer-encoding": chunked }),
+          });
           upstreamResponse.pipe(response);
           return;
         }

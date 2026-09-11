@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { describe, expect, it } from "vitest";
 import type {
   RunRequest,
@@ -63,6 +64,8 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
     baseBranch: "main",
     config: {
       buildCommand: "pnpm install",
+      crawl: DEFAULT_CRAWL_LIMITS,
+      pages: { added: [], removed: [] },
       port: 3000,
       startCommand: "pnpm run dev",
       useDotEnvLocal: false,

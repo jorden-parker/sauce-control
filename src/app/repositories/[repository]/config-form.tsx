@@ -111,6 +111,79 @@ export const ConfigForm = ({
           on this machine. Off by default; keychain variables are always used.
         </p>
       </div>
+      <fieldset className="flex flex-col gap-4 rounded-md border p-4">
+        <legend className="px-1 text-sm font-medium">Discovery</legend>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="maxDepth">Crawl depth</Label>
+            <Input
+              id="maxDepth"
+              name="maxDepth"
+              type="number"
+              min={0}
+              defaultValue={config.crawl.maxDepth}
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="pageLimit">Page limit</Label>
+            <Input
+              id="pageLimit"
+              name="pageLimit"
+              type="number"
+              min={1}
+              defaultValue={config.crawl.pageLimit}
+              required
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="stripQuery"
+            name="stripQuery"
+            defaultChecked={config.crawl.stripQuery}
+          />
+          <Label htmlFor="stripQuery">Strip query strings</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="collapseNumericSegments"
+            name="collapseNumericSegments"
+            defaultChecked={config.crawl.collapseNumericSegments}
+          />
+          <Label htmlFor="collapseNumericSegments">
+            Collapse numeric segments
+          </Label>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="addedPages">Added Pages</Label>
+          <Textarea
+            id="addedPages"
+            name="addedPages"
+            placeholder={"/hidden\n/admin/reports"}
+            rows={3}
+            defaultValue={config.pages.added.join("\n")}
+            autoComplete="off"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="removedPages">Removed Pages</Label>
+          <Textarea
+            id="removedPages"
+            name="removedPages"
+            placeholder="/legal"
+            rows={3}
+            defaultValue={config.pages.removed.join("\n")}
+            autoComplete="off"
+          />
+        </div>
+        <p className="text-sm text-muted-foreground">
+          One path per line. Added Pages are compared even when discovery misses
+          them; removed Pages are left out even when it finds them.
+        </p>
+      </fieldset>
       <Button type="submit" className="self-start">
         Save configuration
       </Button>

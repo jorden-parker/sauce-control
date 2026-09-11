@@ -43,6 +43,33 @@ test("reviewer sees commands pre-filled from the package manifest, gets a produc
   await expect(page.getByLabel("Environment variables")).toHaveValue("");
 });
 
+test("reviewer bounds the crawl and adds or removes Pages by hand, and it persists", async ({
+  page,
+}) => {
+  await page.goto("/repositories/web-app");
+
+  await expect(page.getByLabel("Crawl depth")).toHaveValue("3");
+  await expect(page.getByLabel("Page limit")).toHaveValue("50");
+  await expect(page.getByLabel("Strip query strings")).toBeChecked();
+  await expect(page.getByLabel("Collapse numeric segments")).toBeChecked();
+
+  await page.getByLabel("Crawl depth").fill("2");
+  await page.getByLabel("Page limit").fill("20");
+  await page.getByLabel("Strip query strings").uncheck();
+  await page.getByLabel("Added Pages").fill("/hidden\n/admin");
+  await page.getByLabel("Removed Pages").fill("/legal");
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect(page.getByTestId("saved-config")).toContainText("Saved");
+
+  await page.reload();
+  await expect(page.getByLabel("Crawl depth")).toHaveValue("2");
+  await expect(page.getByLabel("Page limit")).toHaveValue("20");
+  await expect(page.getByLabel("Strip query strings")).not.toBeChecked();
+  await expect(page.getByLabel("Collapse numeric segments")).toBeChecked();
+  await expect(page.getByLabel("Added Pages")).toHaveValue("/hidden\n/admin");
+  await expect(page.getByLabel("Removed Pages")).toHaveValue("/legal");
+});
+
 test("reviewer reaches the Repository Config from the Comparison form", async ({
   page,
 }) => {

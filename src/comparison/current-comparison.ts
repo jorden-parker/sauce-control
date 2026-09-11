@@ -8,19 +8,26 @@ import { loadEnvironment } from "@/repository-config/environment";
 import { dataDirectory } from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
 import { nodeCommandRunner } from "@/shell/command-runner";
+import { type Discovery, discoverPages } from "./discover-pages";
 import { type RunningComparison, runComparison } from "./run-comparison";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
+import { DEFAULT_MANUAL_PAGES } from "@/settings/settings-store";
 import { runStubComparison } from "./stub-comparison";
 
 /** What the Compare page shows about the one Comparison this process can run at a time. */
 export type ComparisonStatus =
   | { kind: "idle" }
-  | { kind: "starting"; repository: string }
+  | { kind: "starting"; repository: string; stage: ComparisonStage }
   | { kind: "failed"; message: string }
   | {
+      discovery: Discovery;
       kind: "running";
       repository: string;
       urls: { base: string; target: string };
     };
+
+/** What the runner is busy with before a Comparison is up. */
+export type ComparisonStage = "instances" | "discovery";
 
 const READINESS = { pollIntervalMs: 1000, timeoutMs: 10 * 60 * 1000 },
   useStub = (): boolean => process.env.SAUCE_CONTROL_COMPARISON === "stub";
@@ -46,7 +53,13 @@ const gather = async () => {
     throw new Error("Save a Comparison first.");
   }
   if (useStub()) {
-    return { ...selection };
+    return {
+      ...selection,
+      discovery: store.getRepositoryConfig(selection.repository) ?? {
+        crawl: DEFAULT_CRAWL_LIMITS,
+        pages: DEFAULT_MANUAL_PAGES,
+      },
+    };
   }
   if (organisation === undefined) {
     throw new Error("Save a GitHub Organisation first.");
@@ -81,7 +94,11 @@ export const startCurrentComparison = async (): Promise<void> => {
   }
   try {
     const request = await gather();
-    status = { kind: "starting", repository: request.repository };
+    status = {
+      kind: "starting",
+      repository: request.repository,
+      stage: "instances",
+    };
     workDirectory = join(dataDirectory(), "comparisons", currentSessionId);
     mkdirSync(workDirectory, { recursive: true });
     const run =
@@ -92,9 +109,19 @@ export const startCurrentComparison = async (): Promise<void> => {
           )
         : runStubComparison();
     run
-      .then((comparison) => {
+      .then(async (comparison) => {
         running = comparison;
         status = {
+          kind: "starting",
+          repository: request.repository,
+          stage: "discovery",
+        };
+        const discovery = await discoverPages(
+          comparison,
+          "config" in request ? request.config : request.discovery
+        );
+        status = {
+          discovery,
           kind: "running",
           repository: request.repository,
           urls: {

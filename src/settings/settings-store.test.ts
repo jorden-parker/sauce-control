@@ -77,6 +77,13 @@ describe("settings store Repository Config", () => {
       first = openSettingsStore(path);
     first.saveRepositoryConfig("web-app", {
       buildCommand: "pnpm install --frozen-lockfile",
+      crawl: {
+        collapseNumericSegments: false,
+        maxDepth: 2,
+        pageLimit: 10,
+        stripQuery: false,
+      },
+      pages: { added: ["/hidden"], removed: ["/legal"] },
       port: 4000,
       startCommand: "pnpm run dev",
       useDotEnvLocal: true,
@@ -86,11 +93,39 @@ describe("settings store Repository Config", () => {
     const second = openSettingsStore(path);
     expect(second.getRepositoryConfig("web-app")).toEqual({
       buildCommand: "pnpm install --frozen-lockfile",
+      crawl: {
+        collapseNumericSegments: false,
+        maxDepth: 2,
+        pageLimit: 10,
+        stripQuery: false,
+      },
+      pages: { added: ["/hidden"], removed: ["/legal"] },
       port: 4000,
       startCommand: "pnpm run dev",
       useDotEnvLocal: true,
     });
     expect(second.getRepositoryConfig("docs")).toBeUndefined();
+  });
+
+  it("gives a config saved before crawl limits and manual Pages existed the defaults", () => {
+    const path = freshDatabasePath(),
+      store = openSettingsStore(path);
+    store.saveRepositoryConfig("web-app", {
+      buildCommand: "npm install",
+      port: 3000,
+      startCommand: "npm run dev",
+      useDotEnvLocal: false,
+    } as never);
+    expect(store.getRepositoryConfig("web-app")).toMatchObject({
+      crawl: {
+        collapseNumericSegments: true,
+        maxDepth: 3,
+        pageLimit: 50,
+        stripQuery: true,
+      },
+      pages: { added: [], removed: [] },
+      port: 3000,
+    });
   });
 });
 

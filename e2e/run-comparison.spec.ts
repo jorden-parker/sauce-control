@@ -31,6 +31,13 @@ test("reviewer runs the saved Comparison and gets a Proxy link to each Instance,
     (await links.last().getAttribute("href")) ?? ""
   );
 
+  const pages = page.getByTestId("discovered-pages");
+  await expect(pages.getByRole("listitem")).toContainText([
+    "/",
+    "/about",
+    "/panel",
+  ]);
+
   await page.getByRole("button", { name: "Stop Comparison" }).click();
   await expect(
     page.getByRole("button", { name: "Run Comparison" })

@@ -1,6 +1,7 @@
 import { cpSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
 import { describe, expect, it } from "vitest";
 import { cliRuntimeAdapter } from "@/container-runtime/cli-runtime-adapter";
 import { RUNTIME_NAMES } from "@/container-runtime/runtime-status";
@@ -36,6 +37,8 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
           branch: "main",
           config: {
             buildCommand: "",
+            crawl: DEFAULT_CRAWL_LIMITS,
+            pages: { added: [], removed: [] },
             port: 3000,
             startCommand: "npm run start",
             useDotEnvLocal: false,
