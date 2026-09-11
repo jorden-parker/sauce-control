@@ -13,6 +13,7 @@ export default defineConfig({
   webServer: {
     command: `pnpm next dev -H 127.0.0.1 -p ${PORT}`,
     env: {
+      SAUCE_CONTROL_COMPARISON: "stub",
       SAUCE_CONTROL_DATA_DIR: dataDirectory,
       SAUCE_CONTROL_DIST_DIR: ".next-e2e",
       SAUCE_CONTROL_GITHUB: "stub",

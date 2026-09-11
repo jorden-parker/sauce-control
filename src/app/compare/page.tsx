@@ -6,9 +6,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  canRunComparison,
+  currentComparison,
+} from "@/comparison/current-comparison";
 import { gitHubClient } from "@/github/github";
 import { settings } from "@/settings/settings";
 import { ComparisonForm } from "./comparison-form";
+import { ComparisonStatusPanel } from "./comparison-status";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +32,8 @@ export default async function ComparePage() {
     repositories =
       organisation !== undefined && client !== undefined
         ? await client.listRepositories(organisation)
-        : [];
+        : [],
+    saved = settings().getComparisonSelection();
 
   return (
     <main className="mx-auto w-full max-w-lg p-8">
@@ -54,13 +60,26 @@ export default async function ComparePage() {
               token.
             </Blocker>
           ) : (
-            <ComparisonForm
-              repositories={repositories}
-              saved={settings().getComparisonSelection()}
-            />
+            <ComparisonForm repositories={repositories} saved={saved} />
           )}
         </CardContent>
       </Card>
+      {saved === undefined ? null : (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Run</CardTitle>
+            <CardDescription>
+              Builds and starts both branches, each reachable through the Proxy.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ComparisonStatusPanel
+              canRun={canRunComparison()}
+              status={currentComparison()}
+            />
+          </CardContent>
+        </Card>
+      )}
     </main>
   );
 }

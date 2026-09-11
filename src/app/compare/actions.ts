@@ -1,6 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import {
+  startCurrentComparison,
+  stopCurrentComparison,
+} from "@/comparison/current-comparison";
 import { gitHubClient } from "@/github/github";
 import { settings } from "@/settings/settings";
 
@@ -27,5 +31,15 @@ export const saveComparisonSelection = async (
     return;
   }
   settings().saveComparisonSelection(selection);
+  revalidatePath("/compare");
+};
+
+export const startComparison = async (): Promise<void> => {
+  await startCurrentComparison();
+  revalidatePath("/compare");
+};
+
+export const stopComparison = async (): Promise<void> => {
+  await stopCurrentComparison();
   revalidatePath("/compare");
 };

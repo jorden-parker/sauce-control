@@ -16,6 +16,14 @@ export const gitHubTokenSource = async (): Promise<
   return (await resolveGitHubToken(ghCli, keychain))?.source;
 };
 
+/** The raw token for git clones, or undefined when the reviewer has none. Never shown. */
+export const gitHubToken = async (): Promise<string | undefined> => {
+  if (useStub()) {
+    return "stub-token";
+  }
+  return (await resolveGitHubToken(ghCli, keychain))?.token;
+};
+
 /** A client for the current credential, or undefined when the reviewer has none. */
 export const gitHubClient = async (): Promise<GitHubClient | undefined> => {
   if (useStub()) {
