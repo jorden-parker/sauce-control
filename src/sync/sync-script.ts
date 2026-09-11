@@ -171,7 +171,7 @@ const installSync = (): void => {
     },
     describe = (element: Element): TargetDescriptor => {
       const descriptor: TargetDescriptor = { cssPath: cssPathOf(element) },
-        withTestId = element.closest("[data-testid]");
+        withTestId = element.closest<HTMLElement>("[data-testid]");
       if (withTestId) {
         descriptor.testId = withTestId.dataset.testid ?? undefined;
       }
