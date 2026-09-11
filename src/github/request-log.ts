@@ -1,6 +1,6 @@
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
-import { dataDirectory } from "@/settings/data-directory";
+import { DatabaseSync } from "node:sqlite";
+import { currentSessionId } from "@/instance/current-session";
+import { gitHubRequestsDatabasePath } from "@/settings/data-directory";
 
 /** One thing this tool asked GitHub for: a REST or GraphQL call, or a git transfer over HTTPS. */
 export interface GitHubRequestEntry {
@@ -20,14 +20,36 @@ export interface GitHubRequestEntry {
   timestamp: string;
 }
 
-/** Appends every GitHub request to one file and counts them for this process. */
+/** One stored row: the entry plus which process run wrote it. */
+export type StoredGitHubRequest = GitHubRequestEntry & { sessionId: string };
+
+/** Stores every GitHub request as one row and counts this process's. */
 export interface GitHubRequestLog {
   /** How many requests this process has logged. */
   count: () => number;
+  /** Every row written by `sessionId` (this process's by default), oldest first. */
+  entries: (sessionId?: string) => StoredGitHubRequest[];
   record: (entry: GitHubRequestEntry) => void;
 }
 
-export const GITHUB_REQUEST_LOG_FILE = "github-requests.log";
+/** Where the rows live and which process run is writing. */
+export interface GitHubRequestLogOptions {
+  databasePath: string;
+  sessionId: string;
+}
+
+interface Row {
+  caller: string;
+  duration_ms: number;
+  kind: "api" | "git";
+  method: string;
+  path: string;
+  rate_limit_remaining: number | null;
+  rate_limit_reset: number | null;
+  session_id: string;
+  status: string;
+  timestamp: string;
+}
 
 const API_HOST = "api.github.com",
   echoToConsole = (): boolean => process.env.SAUCE_CONTROL_LOG_GITHUB === "1",
@@ -35,27 +57,76 @@ const API_HOST = "api.github.com",
     const value = headers.get(name);
     return value === null ? undefined : Number(value);
   },
-  withoutUndefined = (entry: GitHubRequestEntry): GitHubRequestEntry =>
+  withoutUndefined = <T extends object>(entry: T): T =>
     Object.fromEntries(
       Object.entries(entry).filter(([, value]) => value !== undefined)
-    ) as GitHubRequestEntry;
+    ) as T,
+  SCHEMA = `CREATE TABLE IF NOT EXISTS github_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    caller TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    rate_limit_remaining INTEGER,
+    rate_limit_reset INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS github_requests_session ON github_requests (session_id);`,
+  HTTP_STATUS = /^\d+$/u,
+  /** HTTP statuses come back as numbers; git outcomes (`ok`, `failed`) stay strings. */
+  fromRow = (row: Row): StoredGitHubRequest =>
+    withoutUndefined({
+      caller: row.caller,
+      durationMs: row.duration_ms,
+      kind: row.kind,
+      method: row.method,
+      path: row.path,
+      rateLimitRemaining: row.rate_limit_remaining ?? undefined,
+      rateLimitReset: row.rate_limit_reset ?? undefined,
+      sessionId: row.session_id,
+      status: HTTP_STATUS.test(row.status) ? Number(row.status) : row.status,
+      timestamp: row.timestamp,
+    }) as StoredGitHubRequest;
 
-/** A log writing JSON lines to `filePath`; `sink` replaces the file write in tests. */
-export const createGitHubRequestLog = (
-  filePath: string,
-  sink: (line: string) => void = (line) => {
-    appendFileSync(filePath, `${line}\n`);
-  }
-): GitHubRequestLog => {
+/** A log storing one row per GitHub request in SQLite; `count` is this process's total. */
+export const createGitHubRequestLog = ({
+  databasePath,
+  sessionId,
+}: GitHubRequestLogOptions): GitHubRequestLog => {
+  const database = new DatabaseSync(databasePath);
+  database.exec(SCHEMA);
+  const insert = database.prepare(
+      `INSERT INTO github_requests
+         (session_id, timestamp, kind, caller, method, path, status, duration_ms, rate_limit_remaining, rate_limit_reset)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ),
+    select = database.prepare(
+      "SELECT * FROM github_requests WHERE session_id = ? ORDER BY id"
+    );
   let total = 0;
   return {
     count: () => total,
+    entries: (which = sessionId) =>
+      (select.all(which) as unknown as Row[]).map(fromRow),
     record: (entry) => {
       total += 1;
-      const line = JSON.stringify(withoutUndefined(entry));
-      sink(line);
+      insert.run(
+        sessionId,
+        entry.timestamp,
+        entry.kind,
+        entry.caller,
+        entry.method,
+        entry.path,
+        String(entry.status),
+        entry.durationMs,
+        entry.rateLimitRemaining ?? null,
+        entry.rateLimitReset ?? null
+      );
       if (echoToConsole()) {
-        console.info(`[github] ${line}`);
+        console.info(`[github] ${JSON.stringify(withoutUndefined(entry))}`);
       }
     },
   };
@@ -112,10 +183,11 @@ export const loggingFetch =
 
 let processLog: GitHubRequestLog | undefined;
 
-/** The process-wide log under the data directory. */
+/** The process-wide log in the data directory, tagged with this process's session id. */
 export const gitHubRequestLog = (): GitHubRequestLog => {
-  processLog ??= createGitHubRequestLog(
-    join(dataDirectory(), GITHUB_REQUEST_LOG_FILE)
-  );
+  processLog ??= createGitHubRequestLog({
+    databasePath: gitHubRequestsDatabasePath(),
+    sessionId: currentSessionId,
+  });
   return processLog;
 };

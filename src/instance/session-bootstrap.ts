@@ -4,7 +4,10 @@ import { runtimeAdapter } from "@/container-runtime/runtime";
 import { loadRuntimeChoice } from "@/container-runtime/runtime-choice";
 import type { RuntimeName } from "@/container-runtime/runtime-status";
 import { gitHubRequestLog } from "@/github/request-log";
-import { dataDirectory } from "@/settings/data-directory";
+import {
+  dataDirectory,
+  gitHubRequestsDatabasePath,
+} from "@/settings/data-directory";
 import { settings } from "@/settings/settings";
 import { killLiveCommands } from "@/shell/command-runner";
 import { currentSessionId } from "./current-session";
@@ -95,7 +98,7 @@ const runtimeAvailability = async (): Promise<RuntimeAvailability> => {
       cannotVerify(availability, "on exit");
     }
     console.info(
-      `${gitHubRequestLog().count()} GitHub request(s) this session; see ${join(dataDirectory(), "github-requests.log")}.`
+      `${gitHubRequestLog().count()} GitHub request(s) this session; see ${gitHubRequestsDatabasePath()}.`
     );
   },
   verifyNothingLeft = async (

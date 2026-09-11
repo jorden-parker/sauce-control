@@ -11,7 +11,7 @@
 - [x] Exit (SIGINT, SIGTERM, SIGHUP, uncaught error) stops the Comparison, kills live commands, removes every owned container and image and clone directory, verifies, and prints the GitHub request count
 - [x] When the runtime is stopped or none is chosen, cleanup logs that it cannot verify instead of silently doing nothing
 - [x] Settings page Instances card: Repository, branch, state, host port, age, container id, Leftover marker; Stop / Start per row; Stop and remove all
-- [x] Every `api.github.com` request is logged as JSON lines to `github-requests.log` in the data directory with timestamp, caller, method, path, status, duration, and rate-limit headers; git clones are logged with `kind: "git"`
+- [x] Every `api.github.com` request is stored as one row in `github-requests.db` (SQLite, `github_requests` table) in the data directory with session id, timestamp, caller, method, path, status, duration, and rate-limit headers; git clones are stored with `kind: "git"`
 - [x] `SAUCE_CONTROL_LOG_GITHUB=1` echoes each entry to the console
 - [x] Unit tests: ownership sweep leaves other app labels alone, Leftover directories, exit signals, Instances listing and stop/start, request log, adapter inspect/start/stop, Settings page card
 - [x] Smoke test on the real runtime: a container from a "crashed" session with our label is removed and the label lists empty afterwards
@@ -25,3 +25,5 @@ Found while verifying live: `next dev` handles SIGINT itself in the server child
 Checked: `gh auth token` makes no API call (verified with `GH_DEBUG=api`), so the token subprocess is not logged. It still spawns once per client construction; caching it is the obvious next saving.
 
 Not done: `unhandledRejection` is left to Node's default, which already surfaces as `uncaughtException` and so runs the same cleanup. No request budget or warning threshold yet; add once real counts are known. Stopping one Instance of the running Comparison from Settings leaves the Compare page reporting "running" until the Instance is started again.
+
+2026-09-11 (later): The JSON-lines file was replaced by a SQLite database, `github-requests.db`, following `plans/001-github-request-log-in-sqlite.md`. Same `record`/`count` interface plus `entries(sessionId?)` for reading rows back; the singleton tags rows with the process session id. Tests were written first against a temporary database per test, modelled on the settings store tests. Query example: `sqlite3 ~/.sauce-control/github-requests.db 'select caller, count(*) from github_requests group by caller'`.

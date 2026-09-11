@@ -12,3 +12,6 @@ export const dataDirectory = (): string => {
 
 export const settingsDatabasePath = (): string =>
   join(dataDirectory(), "settings.db");
+
+export const gitHubRequestsDatabasePath = (): string =>
+  join(dataDirectory(), "github-requests.db");
