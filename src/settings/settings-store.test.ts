@@ -23,3 +23,20 @@ describe("settings store", () => {
     expect(second.getOrganisation()).toBe("sauce-labs");
   });
 });
+
+describe("settings store Container Runtime", () => {
+  it("has no Container Runtime before one is saved", () => {
+    const store = openSettingsStore(freshDatabasePath());
+    expect(store.getContainerRuntime()).toBeUndefined();
+  });
+
+  it("returns the saved Container Runtime after reopening the same file", () => {
+    const path = freshDatabasePath(),
+      first = openSettingsStore(path);
+    first.saveContainerRuntime("podman");
+    first.close();
+
+    const second = openSettingsStore(path);
+    expect(second.getContainerRuntime()).toBe("podman");
+  });
+});

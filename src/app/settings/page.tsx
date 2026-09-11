@@ -8,13 +8,20 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loadRuntimeChoice } from "@/container-runtime/runtime-choice";
+import { runtimeAdapter } from "@/container-runtime/runtime";
 import { settings } from "@/settings/settings";
 import { saveOrganisation } from "./actions";
+import { ContainerRuntimeCard } from "./container-runtime-card";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
-  const organisation = settings().getOrganisation();
+export default async function SettingsPage() {
+  const organisation = settings().getOrganisation(),
+    runtimeChoice = await loadRuntimeChoice(
+      runtimeAdapter,
+      settings().getContainerRuntime()
+    );
 
   return (
     <main className="mx-auto w-full max-w-lg p-8">
@@ -52,6 +59,9 @@ export default function SettingsPage() {
           </form>
         </CardContent>
       </Card>
+      <div className="mt-6">
+        <ContainerRuntimeCard choice={runtimeChoice} />
+      </div>
     </main>
   );
 }
