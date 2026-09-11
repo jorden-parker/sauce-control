@@ -8,7 +8,7 @@ import type { RuntimeName } from "@/container-runtime/runtime-status";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 /** In-memory Container Runtimes: docker installed and stopped, podman absent. */
-const fake: RuntimeAdapter & {
+const fake: Pick<RuntimeAdapter, "detect" | "start"> & {
   running: boolean;
   startError?: string;
   starts: RuntimeName[];

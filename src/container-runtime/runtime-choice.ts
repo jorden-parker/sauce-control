@@ -49,7 +49,7 @@ export const resolveRuntimeChoice = ({
 
 /** Detect every known runtime through the adapter and apply the choice rules. */
 export const loadRuntimeChoice = async (
-  adapter: RuntimeAdapter,
+  adapter: Pick<RuntimeAdapter, "detect">,
   saved: RuntimeName | undefined
 ): Promise<RuntimeChoice> =>
   resolveRuntimeChoice({

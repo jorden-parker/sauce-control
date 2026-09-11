@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { ComboBox } from "@/components/ui/combobox";
@@ -48,6 +49,14 @@ export const ComparisonForm = ({
           emptyText="No repository found."
         />
         <input type="hidden" name="repository" value={repository ?? ""} />
+        {repository === undefined ? null : (
+          <Link
+            href={`/repositories/${encodeURIComponent(repository)}`}
+            className="self-start text-sm underline"
+          >
+            Configure {repository}
+          </Link>
+        )}
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="targetBranch">Target Branch</Label>

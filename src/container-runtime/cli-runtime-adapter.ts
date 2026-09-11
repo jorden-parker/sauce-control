@@ -1,17 +1,9 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
 import type { RuntimeAdapter } from "./runtime-adapter";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 import { startPlan } from "./start-command";
 
-/** Runs one command; rejects with `code: "ENOENT"` when the binary is absent and after `timeoutMs` when it hangs. */
-export interface CommandRunner {
-  run: (
-    command: string,
-    args: string[],
-    options: { timeoutMs: number }
-  ) => Promise<{ stdout: string }>;
-}
+export type { CommandRunner };
 
 export interface CliAdapterOptions {
   /** Upper bound per CLI call so a wedged daemon cannot hang the page. */
@@ -19,20 +11,31 @@ export interface CliAdapterOptions {
   platform: NodeJS.Platform;
 }
 
-const execFileAsync = promisify(execFile),
-  DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
+const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
+  BUILD_TIMEOUT_MS = 30 * 60 * 1000,
+  /** Resource caps for one Instance. */
+  HARDENING = [
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--memory",
+    "4g",
+    "--cpus",
+    "2",
+    "--pids-limit",
+    "1024",
+    "--tmpfs",
+    "/tmp",
+  ],
+  HEX_PORT = (port: number): string =>
+    port.toString(16).toUpperCase().padStart(4, "0"),
   VERSION_PATTERN = /\d+\.\d+\.\d+/u,
   isMissingBinary = (error: unknown): boolean =>
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
     error.code === "ENOENT";
-
-/** Real shell: `execFile` with a kill-on-timeout. */
-export const nodeCommandRunner: CommandRunner = {
-  run: (command, args, { timeoutMs }) =>
-    execFileAsync(command, args, { timeout: timeoutMs }),
-};
 
 export const createCliRuntimeAdapter = (
   shell: CommandRunner,
@@ -73,12 +76,94 @@ export const createCliRuntimeAdapter = (
     };
 
   return {
+    buildImage: async (name, { context, dockerfile, labels, tag }) => {
+      await shell.run(
+        name,
+        [
+          "build",
+          "-t",
+          tag,
+          ...Object.entries(labels).flatMap(([key, value]) => [
+            "--label",
+            `${key}=${value}`,
+          ]),
+          ...(dockerfile === undefined ? [] : ["-f", "-"]),
+          context,
+        ],
+        { input: dockerfile, timeoutMs: BUILD_TIMEOUT_MS }
+      );
+    },
     detect: async (name): Promise<RuntimeStatus> => {
       const version = await installedVersion(name);
       if (version === undefined) {
         return { installed: false, name };
       }
       return { installed: true, name, running: await isRunning(name), version };
+    },
+    isListening: async (name, containerId, port) => {
+      try {
+        await run(name, [
+          "exec",
+          containerId,
+          "sh",
+          "-c",
+          `grep -qi ':${HEX_PORT(port)} ' /proc/net/tcp /proc/net/tcp6`,
+        ]);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    listContainers: async (name, label) => {
+      const { stdout } = await run(name, [
+        "ps",
+        "-aq",
+        "--no-trunc",
+        "--filter",
+        `label=${label}`,
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+    },
+    removeContainers: async (name, containerIds) => {
+      if (containerIds.length === 0) {
+        return;
+      }
+      await run(name, ["rm", "-f", ...containerIds]);
+    },
+    removeImages: async (name, label) => {
+      await run(name, ["image", "prune", "-af", "--filter", `label=${label}`]);
+    },
+    runContainer: async (name, { environment, image, labels, port }) => {
+      const { stdout } = await shell.run(
+          name,
+          [
+            "run",
+            "-d",
+            ...HARDENING,
+            "-p",
+            `127.0.0.1::${port}`,
+            ...Object.entries(labels).flatMap(([key, value]) => [
+              "-l",
+              `${key}=${value}`,
+            ]),
+            // Names only: values travel through the child environment, never the argument list.
+            ...Object.keys(environment).flatMap((key) => ["-e", key]),
+            image,
+          ],
+          { environment, timeoutMs: commandTimeoutMs }
+        ),
+        containerId = stdout.trim(),
+        published = await run(name, ["port", containerId, `${port}/tcp`]),
+        hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
+      if (Number.isNaN(hostPort)) {
+        throw new Error(
+          `Could not find the host port for container ${containerId}: ${published.stdout.trim()}`
+        );
+      }
+      return { containerId, hostPort };
     },
     start: async (name) => {
       const { command, hint } = startPlan(name, {

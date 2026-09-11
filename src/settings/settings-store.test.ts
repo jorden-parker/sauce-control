@@ -65,3 +65,45 @@ describe("settings store Comparison selection", () => {
     });
   });
 });
+
+describe("settings store Repository Config", () => {
+  it("has no config for a Repository before one is saved", () => {
+    const store = openSettingsStore(freshDatabasePath());
+    expect(store.getRepositoryConfig("web-app")).toBeUndefined();
+  });
+
+  it("returns the saved config for that Repository only, after reopening", () => {
+    const path = freshDatabasePath(),
+      first = openSettingsStore(path);
+    first.saveRepositoryConfig("web-app", {
+      buildCommand: "pnpm install --frozen-lockfile",
+      port: 4000,
+      startCommand: "pnpm run dev",
+      useDotEnvLocal: true,
+    });
+    first.close();
+
+    const second = openSettingsStore(path);
+    expect(second.getRepositoryConfig("web-app")).toEqual({
+      buildCommand: "pnpm install --frozen-lockfile",
+      port: 4000,
+      startCommand: "pnpm run dev",
+      useDotEnvLocal: true,
+    });
+    expect(second.getRepositoryConfig("docs")).toBeUndefined();
+  });
+});
+
+describe("settings store Code Directory", () => {
+  it("returns the saved Code Directory after reopening the same file", () => {
+    const path = freshDatabasePath(),
+      first = openSettingsStore(path);
+    expect(first.getCodeDirectory()).toBeUndefined();
+    first.saveCodeDirectory("/Users/reviewer/src");
+    first.close();
+
+    expect(openSettingsStore(path).getCodeDirectory()).toBe(
+      "/Users/reviewer/src"
+    );
+  });
+});

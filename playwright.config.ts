@@ -16,6 +16,7 @@ export default defineConfig({
       SAUCE_CONTROL_DATA_DIR: dataDirectory,
       SAUCE_CONTROL_DIST_DIR: ".next-e2e",
       SAUCE_CONTROL_GITHUB: "stub",
+      SAUCE_CONTROL_KEYCHAIN: "memory",
     },
     reuseExistingServer: false,
     stderr: "ignore",

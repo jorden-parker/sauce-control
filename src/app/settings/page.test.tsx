@@ -15,7 +15,7 @@ import type {
 const machine: { statuses: Partial<Record<RuntimeName, RuntimeStatus>> } = {
     statuses: {},
   },
-  fake: RuntimeAdapter = {
+  fake: Pick<RuntimeAdapter, "detect" | "start"> = {
     detect: (name) =>
       Promise.resolve(machine.statuses[name] ?? { installed: false, name }),
     start: () => Promise.resolve(),

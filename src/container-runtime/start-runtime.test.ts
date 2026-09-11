@@ -10,7 +10,7 @@ const fakeAdapter = ({
   }: {
     pollsUntilReady?: number;
     startFails?: boolean;
-  } = {}): RuntimeAdapter & {
+  } = {}): Pick<RuntimeAdapter, "detect" | "start"> & {
     starts: RuntimeName[];
   } => {
     let polls = 0,

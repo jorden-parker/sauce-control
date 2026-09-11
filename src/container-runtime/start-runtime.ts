@@ -12,7 +12,7 @@ const isRunning = (status: RuntimeStatus): boolean =>
 
 /** Start a stopped Container Runtime and wait until it reports running. */
 export const startRuntime = async (
-  adapter: RuntimeAdapter,
+  adapter: Pick<RuntimeAdapter, "detect" | "start">,
   name: RuntimeName,
   { pollIntervalMs, timeoutMs }: StartOptions
 ): Promise<RuntimeStatus> => {

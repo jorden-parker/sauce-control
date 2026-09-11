@@ -13,13 +13,23 @@ const fakeShell = ({
   }: {
     hang?: string[];
     outputs: Record<string, string>;
-  }): CommandRunner & { calls: string[] } => {
-    const calls: string[] = [];
+  }): CommandRunner & {
+    calls: string[];
+    environments: (Record<string, string> | undefined)[];
+    inputs: (string | undefined)[];
+  } => {
+    const calls: string[] = [],
+      environments: (Record<string, string> | undefined)[] = [],
+      inputs: (string | undefined)[] = [];
     return {
       calls,
-      run: (command, args, { timeoutMs }) => {
+      environments,
+      inputs,
+      run: (command, args, { environment, input, timeoutMs }) => {
         const line = [command, ...args].join(" ");
         calls.push(line);
+        environments.push(environment);
+        inputs.push(input);
         if (hang.includes(line)) {
           return new Promise((_, reject) => {
             setTimeout(
@@ -102,5 +112,101 @@ describe.each(RUNTIME_NAMES)("real %s adapter", (name) => {
     }
     expect(status.version).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(typeof status.running).toBe("boolean");
+  });
+});
+
+describe("CLI adapter containers", () => {
+  it("runs a hardened detached container: no host network, all capabilities dropped, caps, loopback port, labels, env by name only", async () => {
+    const shell = fakeShell({
+        outputs: {
+          "docker port abc123def 3000/tcp": "127.0.0.1:49152\n",
+          "docker run -d --cap-drop ALL --security-opt no-new-privileges --memory 4g --cpus 2 --pids-limit 1024 --tmpfs /tmp -p 127.0.0.1::3000 -l sauce-control.session=s1 -e API_URL sauce-control/web-app:s1":
+            "abc123def\n",
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+
+    await expect(
+      adapter.runContainer("docker", {
+        environment: { API_URL: "https://api.example.test" },
+        image: "sauce-control/web-app:s1",
+        labels: { "sauce-control.session": "s1" },
+        port: 3000,
+      })
+    ).resolves.toEqual({ containerId: "abc123def", hostPort: 49_152 });
+    expect(shell.environments.at(-2)).toEqual({
+      API_URL: "https://api.example.test",
+    });
+  });
+
+  it("builds from the context with an inline Dockerfile on stdin when one is generated, labelling the image", async () => {
+    const shell = fakeShell({
+        outputs: {
+          "docker build -t tag --label sauce-control.session=s1 -f - /tmp/clone":
+            "",
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await adapter.buildImage("docker", {
+      context: "/tmp/clone",
+      dockerfile: "FROM scratch\n",
+      labels: { "sauce-control.session": "s1" },
+      tag: "tag",
+    });
+    expect(shell.inputs).toEqual(["FROM scratch\n"]);
+  });
+
+  it("builds with the context's own Dockerfile otherwise", async () => {
+    const shell = fakeShell({
+        outputs: { "docker build -t tag /tmp/clone": "" },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await adapter.buildImage("docker", {
+      context: "/tmp/clone",
+      dockerfile: undefined,
+      labels: {},
+      tag: "tag",
+    });
+    expect(shell.calls).toEqual(["docker build -t tag /tmp/clone"]);
+  });
+
+  it("checks for a listener on the port from inside the container", async () => {
+    const listening = fakeShell({
+        outputs: {
+          "docker exec abc123 sh -c grep -qi ':0BB8 ' /proc/net/tcp /proc/net/tcp6":
+            "",
+        },
+      }),
+      silent = fakeShell({ outputs: {} }),
+      adapter = createCliRuntimeAdapter(listening, mac);
+    await expect(adapter.isListening("docker", "abc123", 3000)).resolves.toBe(
+      true
+    );
+    await expect(
+      createCliRuntimeAdapter(silent, mac).isListening("docker", "abc123", 3000)
+    ).resolves.toBe(false);
+  });
+
+  it("lists containers by label, running or not, and force-removes by id", async () => {
+    const shell = fakeShell({
+        outputs: {
+          "docker image prune -af --filter label=sauce-control.session": "",
+          "docker ps -aq --no-trunc --filter label=sauce-control.session":
+            "abc\ndef\n",
+          "docker rm -f abc def": "",
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await expect(
+      adapter.listContainers("docker", "sauce-control.session")
+    ).resolves.toEqual(["abc", "def"]);
+    await adapter.removeContainers("docker", ["abc", "def"]);
+    await adapter.removeContainers("docker", []);
+    await adapter.removeImages("docker", "sauce-control.session");
+    expect(shell.calls).toEqual([
+      "docker ps -aq --no-trunc --filter label=sauce-control.session",
+      "docker rm -f abc def",
+      "docker image prune -af --filter label=sauce-control.session",
+    ]);
   });
 });

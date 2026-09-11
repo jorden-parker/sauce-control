@@ -14,6 +14,13 @@ export interface GitHubClient {
   listBranches: (organisation: string, repository: string) => Promise<string[]>;
   /** Every Repository in the Organisation, sorted by name. */
   listRepositories: (organisation: string) => Promise<Repository[]>;
+  /** One file's text on one branch, or undefined when it does not exist. */
+  readFile: (
+    organisation: string,
+    repository: string,
+    path: string,
+    ref: string
+  ) => Promise<string | undefined>;
 }
 
 const API = "https://api.github.com",
@@ -26,6 +33,11 @@ interface RepositoryResponse {
 
 interface BranchResponse {
   name: string;
+}
+
+interface ContentsResponse {
+  content: string;
+  encoding: string;
 }
 
 const nextPage = (response: Response): string | undefined =>
@@ -78,6 +90,22 @@ export const createGitHubClient = (
         defaultBranch: repository.default_branch,
         name: repository.name,
       }));
+    },
+    readFile: async (organisation, repository, path, ref) => {
+      const response = await fetch(
+        `${API}/repos/${encodeURIComponent(organisation)}/${encodeURIComponent(repository)}/contents/${path}?ref=${encodeURIComponent(ref)}`,
+        { headers }
+      );
+      if (response.status === 404) {
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(
+          `GitHub responded ${response.status}: ${await errorMessage(response)}`
+        );
+      }
+      const body = (await response.json()) as ContentsResponse;
+      return Buffer.from(body.content, "base64").toString("utf8");
     },
   };
 };

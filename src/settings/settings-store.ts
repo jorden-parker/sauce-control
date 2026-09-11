@@ -11,19 +11,42 @@ export interface ComparisonSelection {
   targetBranch: string;
 }
 
+/** How one Repository is built and started, saved once and reused for every Comparison of it. */
+export interface RepositoryConfig {
+  buildCommand: string;
+  port: number;
+  startCommand: string;
+  /** Explicit opt-in to the clone's `.env.local` instead of keychain variables only. */
+  useDotEnvLocal: boolean;
+}
+
 export interface SettingsStore {
   close: () => void;
+  getCodeDirectory: () => string | undefined;
   getComparisonSelection: () => ComparisonSelection | undefined;
   getContainerRuntime: () => RuntimeName | undefined;
   getOrganisation: () => string | undefined;
+  getRepositoryConfig: (repository: string) => RepositoryConfig | undefined;
+  saveCodeDirectory: (directory: string) => void;
   saveComparisonSelection: (selection: ComparisonSelection) => void;
   saveContainerRuntime: (runtime: RuntimeName) => void;
   saveOrganisation: (organisation: string) => void;
+  saveRepositoryConfig: (repository: string, config: RepositoryConfig) => void;
 }
 
-const COMPARISON_SELECTION_KEY = "comparison-selection",
+const CODE_DIRECTORY_KEY = "code-directory",
+  COMPARISON_SELECTION_KEY = "comparison-selection",
   CONTAINER_RUNTIME_KEY = "container-runtime",
   ORGANISATION_KEY = "organisation",
+  repositoryConfigKey = (repository: string): string =>
+    `repository-config:${repository}`,
+  isRepositoryConfig = (value: unknown): value is RepositoryConfig =>
+    typeof value === "object" &&
+    value !== null &&
+    "buildCommand" in value &&
+    "port" in value &&
+    "startCommand" in value &&
+    "useDotEnvLocal" in value,
   isSelection = (value: unknown): value is ComparisonSelection =>
     typeof value === "object" &&
     value !== null &&
@@ -47,6 +70,7 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     close: () => {
       database.close();
     },
+    getCodeDirectory: () => read(CODE_DIRECTORY_KEY),
     getComparisonSelection: () => {
       const value = read(COMPARISON_SELECTION_KEY);
       if (value === undefined) {
@@ -60,6 +84,17 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
       return value !== undefined && isRuntimeName(value) ? value : undefined;
     },
     getOrganisation: () => read(ORGANISATION_KEY),
+    getRepositoryConfig: (repository) => {
+      const value = read(repositoryConfigKey(repository));
+      if (value === undefined) {
+        return;
+      }
+      const parsed: unknown = JSON.parse(value);
+      return isRepositoryConfig(parsed) ? parsed : undefined;
+    },
+    saveCodeDirectory: (directory) => {
+      upsert.run(CODE_DIRECTORY_KEY, directory);
+    },
     saveComparisonSelection: (selection) => {
       upsert.run(COMPARISON_SELECTION_KEY, JSON.stringify(selection));
     },
@@ -68,6 +103,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     saveOrganisation: (organisation) => {
       upsert.run(ORGANISATION_KEY, organisation);
+    },
+    saveRepositoryConfig: (repository, config) => {
+      upsert.run(repositoryConfigKey(repository), JSON.stringify(config));
     },
   };
 };

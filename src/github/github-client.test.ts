@@ -111,3 +111,24 @@ describe("GitHub client errors", () => {
     ).rejects.toThrow("GitHub responded 401: Bad credentials");
   });
 });
+
+describe("GitHub client file contents", () => {
+  it("decodes a file from one branch, or reports it missing", async () => {
+    const github = fakeGitHub({
+        "https://api.github.com/repos/sauce-labs/web-app/contents/package.json?ref=main":
+          {
+            body: {
+              content: Buffer.from('{"name":"web-app"}\n').toString("base64"),
+              encoding: "base64",
+            },
+          },
+      }),
+      client = createGitHubClient(github.fetch, "ghp_abc123");
+    await expect(
+      client.readFile("sauce-labs", "web-app", "package.json", "main")
+    ).resolves.toBe('{"name":"web-app"}\n');
+    await expect(
+      client.readFile("sauce-labs", "web-app", "Dockerfile", "main")
+    ).resolves.toBeUndefined();
+  });
+});
