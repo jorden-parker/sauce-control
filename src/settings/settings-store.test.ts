@@ -3,6 +3,56 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openSettingsStore } from "./settings-store";
+import { DEFAULT_CRAWL_LIMITS } from "@/crawler/crawl-limits";
+
+const legacy = (environmentSetupCommand: string) => ({
+  crawl: DEFAULT_CRAWL_LIMITS,
+  environmentSetupCommand,
+  installCommand: "",
+  pages: { added: [], removed: [] },
+  port: 3000,
+  startCommand: "",
+});
+
+describe("central environment setup", () => {
+  it("migrates identical commands once and retains a cleared shared setting across restarts and Organisations", () => {
+    const path = freshDatabasePath(),
+      store = openSettingsStore(path);
+    store.saveRepositoryConfig("one", legacy(" export TOKEN=old "));
+    store.saveRepositoryConfig("two", legacy("export TOKEN=old"));
+    expect(store.getEnvironmentSetup()).toEqual({
+      command: "export TOKEN=old",
+      conflicts: [],
+    });
+    store.saveEnvironmentSetupCommand("");
+    store.saveOrganisation("different-company");
+    store.close();
+    const reopened = openSettingsStore(path);
+    expect(reopened.getEnvironmentSetup()).toEqual({
+      command: "",
+      conflicts: [],
+    });
+    reopened.close();
+  });
+  it("keeps all conflicting commands until an explicit shared choice or empty command is saved", () => {
+    const store = openSettingsStore(freshDatabasePath());
+    store.saveRepositoryConfig("one", legacy("export TOKEN=one"));
+    store.saveRepositoryConfig("two", legacy("export TOKEN=two"));
+    expect(store.getEnvironmentSetup()).toEqual({
+      command: "",
+      conflicts: [
+        { command: "export TOKEN=one", repository: "one" },
+        { command: "export TOKEN=two", repository: "two" },
+      ],
+    });
+    store.saveEnvironmentSetupCommand("export TOKEN=shared");
+    expect(store.getEnvironmentSetup()).toEqual({
+      command: "export TOKEN=shared",
+      conflicts: [],
+    });
+    store.close();
+  });
+});
 
 const freshDatabasePath = (): string =>
   join(mkdtempSync(join(tmpdir(), "sauce-control-")), "settings.db");

@@ -10,13 +10,15 @@ Status: accepted and implemented.
 - The stated reason for retaining `NODE_AUTH_TOKEN` after initial installation is updating packages, rather than authentication by the running application.
 - For this feature, package updates require a new Comparison and fresh environment setup; updating packages within a retained Instance is out of scope. Keep `NODE_AUTH_TOKEN` installation-only.
 - Allow setup to wait for browser-based authentication with a visible waiting state. Interactive terminal prompts are out of scope. This is intended behavior, not yet verification of how Pizzabox authenticates.
-- Save the command per Repository and run it once before each new Comparison. Both Instances receive one captured snapshot; individual Instance restarts reuse it.
+- Save one app-wide command in Settings and run it once before each new Comparison. Both Instances receive one captured snapshot; individual Instance restarts reuse it.
 - Execute using the user's login shell, starting in their home directory. Sourced files should use absolute paths or `~/…`.
 - Capture exported variables added or changed by setup, rather than forwarding the entire host environment. Setup values override matching Environment File values.
 - Keep container execution settings, including `PATH`, `HOME` and `PORT`, under Sauce Control's control.
-- Place an optional Environment Setup Command field alongside the Repository's dependency installation command. An empty field skips setup. Persist command text, never captured variable values.
+- Place an optional Environment Setup Command field in Settings, linked from Compare. An empty field skips setup. Persist command text, never captured variable values.
 - If setup fails, is cancelled, or exceeds five minutes, stop the Comparison before dependency installation. Show a clear error and retry option; do not fall back to stale credentials.
 - Show setup progress and exit status, suppressing raw command output because it may contain credentials. Browser authentication may open normally; terminal prompts are unsupported.
+
+Central placement and legacy migration are specified in the [central setup design](./central-environment-setup-design.md).
 
 ## Architecture decision
 
@@ -36,7 +38,7 @@ The saved command may reference a sourced file, but Environment Files themselves
 
 ## Implementation verification
 
-- Verify optional command save, reload and clearing per Repository.
+- Verify optional command save, reload and clearing across Repositories and Organisations.
 - Use synthetic setup commands to verify same-shell sourcing, export capture, merge precedence, exclusion of unchanged host variables and protection of reserved settings.
 - Verify one execution per Comparison, identical delivery to both Instances, restart reuse and fresh execution for a new Comparison.
 - Verify setup variables reach both stages while `NODE_AUTH_TOKEN` reaches only dependency installation.

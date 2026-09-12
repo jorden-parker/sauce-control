@@ -33,7 +33,7 @@ A user-selected file containing named values needed to install dependencies or r
 _Avoid_: Secret file (not every value is a secret)
 
 **Environment Setup Command**:
-A user-provided command that prepares additional environment variables for a Comparison. It is separate from the dependency installation command.
+A centrally configured, user-provided command that prepares additional environment variables for Comparisons across Repositories. It is separate from the dependency installation command.
 
 **Leftover**:
 An Instance, its image, or its clone directory whose owning Sauce Control process has exited. Removed when Sauce Control starts and when it exits.

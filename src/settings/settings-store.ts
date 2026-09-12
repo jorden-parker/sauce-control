@@ -23,7 +23,7 @@ export const DEFAULT_MANUAL_PAGES: ManualPages = { added: [], removed: [] };
 
 /** Dependency installation and development-server configuration for a Repository. */
 export interface RepositoryConfig {
-  /** Optional host command that prepares exported variables before a Comparison. */
+  /** Legacy setup retained for migration to the app-wide setting. */
   environmentSetupCommand?: string;
   installCommand: string;
   crawl: CrawlLimits;
@@ -41,6 +41,8 @@ export interface ScenarioConfig {
 }
 
 export interface SettingsStore {
+  getEnvironmentSetup: () => EnvironmentSetup;
+  saveEnvironmentSetupCommand: (command: string) => void;
   getScenarioConfig: (repository: string) => ScenarioConfig;
   saveScenarioConfig: (repository: string, config: ScenarioConfig) => void;
   close: () => void;
@@ -56,6 +58,11 @@ export interface SettingsStore {
   saveContainerRuntime: (runtime: RuntimeName) => void;
   saveOrganisation: (organisation: string) => void;
   saveRepositoryConfig: (repository: string, config: RepositoryConfig) => void;
+}
+
+export interface EnvironmentSetup {
+  command: string;
+  conflicts: { repository: string; command: string }[];
 }
 
 const CODE_DIRECTORY_KEY = "code-directory",
@@ -121,6 +128,33 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
         ? paths
         : [];
     },
+    getEnvironmentSetup: () => {
+      const saved = read("environment-setup-command");
+      if (saved !== undefined) return { command: saved, conflicts: [] };
+      const legacy: EnvironmentSetup["conflicts"] = [];
+      for (const row of database
+        .prepare(
+          "SELECT key, value FROM settings WHERE key LIKE 'repository-config:%' ORDER BY key"
+        )
+        .all()) {
+        const config: unknown = JSON.parse(String(row.value));
+        if (
+          isRepositoryConfig(config) &&
+          typeof config.environmentSetupCommand === "string" &&
+          config.environmentSetupCommand.trim()
+        ) {
+          legacy.push({
+            repository: String(row.key).slice("repository-config:".length),
+            command: config.environmentSetupCommand.trim(),
+          });
+        }
+      }
+      const commands = new Set(legacy.map(({ command }) => command));
+      if (commands.size > 1) return { command: "", conflicts: legacy };
+      const command = [...commands][0] ?? "";
+      upsert.run("environment-setup-command", command);
+      return { command, conflicts: [] };
+    },
     getOrganisation: () => read(ORGANISATION_KEY),
     getRepositoryConfig: (repository) => {
       const value = read(repositoryConfigKey(repository));
@@ -155,6 +189,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     saveEnvironmentFiles: (repository, paths) => {
       upsert.run(`environment-files:${repository}`, JSON.stringify(paths));
+    },
+    saveEnvironmentSetupCommand: (command) => {
+      upsert.run("environment-setup-command", command);
     },
     saveOrganisation: (organisation) => {
       upsert.run(ORGANISATION_KEY, organisation);

@@ -72,6 +72,7 @@ describe("currentComparison", () => {
   });
   afterEach(async () => {
     await comparison.stopCurrentComparison();
+    settings.settings().saveEnvironmentSetupCommand("");
     const store = settings.settings(),
       repository = store.getComparisonSelection()?.repository;
     if (repository) {
@@ -186,6 +187,7 @@ describe("currentComparison", () => {
       startCommand: "pnpm dev",
     };
     store.saveRepositoryConfig(repository, config);
+    store.saveEnvironmentSetupCommand(config.environmentSetupCommand);
     await comparison.startCurrentComparison();
     await vi.waitFor(() => expect(runComparison).toHaveBeenCalledOnce());
     expect(runComparison.mock.calls[0]![1]).toMatchObject({
@@ -206,6 +208,15 @@ describe("currentComparison", () => {
       environmentSetupCommand:
         "export API_URL=refreshed NODE_AUTH_TOKEN=second",
     });
+    store.saveEnvironmentSetupCommand(
+      "export API_URL=refreshed NODE_AUTH_TOKEN=second"
+    );
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository: "another-setup-app",
+      targetBranch: "feature",
+    });
+    store.saveOrganisation("another-organisation");
     await comparison.startCurrentComparison();
     await vi.waitFor(() => expect(runComparison).toHaveBeenCalledTimes(2));
     expect(runComparison.mock.calls[1]![1].environment).toEqual({
@@ -230,6 +241,9 @@ describe("currentComparison", () => {
       port: 3000,
       startCommand: "pnpm dev",
     });
+    store.saveEnvironmentSetupCommand(
+      "echo synthetic-private-output >&2; exit 42"
+    );
     await comparison.startCurrentComparison();
     await vi.waitFor(() =>
       expect(comparison.currentComparisonSnapshot()).toMatchObject({
@@ -259,6 +273,7 @@ describe("currentComparison", () => {
       port: 3000,
       startCommand: "pnpm dev",
     });
+    store.saveEnvironmentSetupCommand("sleep 30");
     await comparison.startCurrentComparison();
     expect(
       comparison.currentComparisonSnapshot().progress?.steps
@@ -288,6 +303,27 @@ describe("currentComparison", () => {
     });
   });
 
+  it("blocks direct startup when legacy setup commands conflict", async () => {
+    const spy = vi
+      .spyOn(settings.settings(), "getEnvironmentSetup")
+      .mockReturnValueOnce({
+        command: "",
+        conflicts: [
+          { command: "private-command-one", repository: "one" },
+          { command: "private-command-two", repository: "two" },
+        ],
+      });
+    await comparison.startCurrentComparison();
+    expect(runComparison).not.toHaveBeenCalled();
+    expect(comparison.currentComparison()).toMatchObject({
+      kind: "failed",
+      message: expect.stringContaining("Settings"),
+    });
+    expect(
+      JSON.stringify(comparison.currentComparisonSnapshot())
+    ).not.toContain("private-command");
+    spy.mockRestore();
+  });
   it("suppresses arbitrary errors even when they resemble a safe summary", async () => {
     runComparison.mockRejectedValueOnce(
       new Error("Dependency installation failed: secret-token")

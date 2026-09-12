@@ -34,32 +34,6 @@ export const ConfigForm = ({
     <form action={saveRepositoryConfig} className="flex flex-col gap-4">
       <input type="hidden" name="repository" value={repository} />
       <div className="flex flex-col gap-2">
-        <Label htmlFor="environmentSetupCommand">
-          Environment Setup Command
-        </Label>
-        <Textarea
-          id="environmentSetupCommand"
-          name="environmentSetupCommand"
-          defaultValue={config.environmentSetupCommand ?? ""}
-          placeholder="pizzabox token update && pizzabox token env --repo pnpm && source ~/path/to/env"
-          rows={3}
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={65_536}
-          aria-describedby="environment-setup-help"
-        />
-        <p
-          id="environment-setup-help"
-          className="text-sm text-muted-foreground"
-        >
-          Optional. Runs on your computer in your login shell, from your home
-          directory, before each Comparison. Use an absolute path or ~/… when
-          sourcing a file. Exported values override Environment Files. Keep
-          installation in the field below. Command text is saved; captured
-          values are not. Browser login is supported; terminal prompts are not.
-        </p>
-      </div>
-      <div className="flex flex-col gap-2">
         <Label htmlFor="installCommand">Dependency installation command</Label>
         <Input
           id="installCommand"

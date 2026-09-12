@@ -297,10 +297,14 @@ export const startCurrentComparison = async (
     ) {
       throw new Error("Choose a valid Scenario.");
     }
+    const setup = settings().getEnvironmentSetup();
+    if (setup.conflicts.length > 0) {
+      throw new EnvironmentSetupError(
+        "Resolve the different saved environment setup commands in Settings before running a Comparison."
+      );
+    }
     const request = await gather(),
-      setupCommand = settings().getRepositoryConfig(
-        request.repository
-      )?.environmentSetupCommand;
+      setupCommand = setup.command;
     attempt.runtime = "config" in request ? request.runtime : undefined;
     signal.throwIfAborted();
     attempt.workDirectory = join(
@@ -343,7 +347,9 @@ export const startCurrentComparison = async (
                   ...request,
                   onFailure: fail,
                   onProgress: (role, step) => {
-                    if (!signal.aborted) attempt.progress.begin(role, step);
+                    if (!signal.aborted) {
+                      attempt.progress.begin(role, step);
+                    }
                   },
                   setupEnvironment,
                   signal,

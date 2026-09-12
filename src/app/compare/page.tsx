@@ -36,12 +36,21 @@ export default async function ComparePage() {
         : [],
     saved = settings().getComparisonSelection(),
     status = currentComparison(),
+    setup = settings().getEnvironmentSetup(),
     canRun = await canRunComparison();
 
   return (
     <main className="mx-auto w-full max-w-6xl p-8">
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">Compare</h1>
       <div className="max-w-lg">
+        <p className="mb-4 text-sm text-muted-foreground">
+          {setup.conflicts.length > 0
+            ? "Resolve the different saved setup commands before running a Comparison. "
+            : "Environment setup is shared across all repositories. "}
+          <Link href="/settings#environment-setup" className="underline">
+            Configure environment setup
+          </Link>
+        </p>
         <Card>
           <CardHeader>
             <CardTitle>Choose what to compare</CardTitle>
@@ -87,7 +96,7 @@ export default async function ComparePage() {
                 key={saved.repository}
                 repository={saved.repository}
                 paths={settings().getEnvironmentFiles(saved.repository)}
-                canRun={canRun}
+                canRun={canRun && setup.conflicts.length === 0}
                 manualScenarioNames={settings()
                   .getScenarioConfig(saved.repository)
                   .manualScenarios.map(({ name }) => name)}

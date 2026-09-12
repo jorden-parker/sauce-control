@@ -19,6 +19,7 @@ import { ContainerRuntimeCard } from "./container-runtime-card";
 import { InstancesCard } from "./instances-card";
 import { GitHubAccessCard } from "./github-access-card";
 import { gitHubTokenSource } from "@/github/github";
+import { EnvironmentSetupCard } from "./environment-setup-card";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +77,9 @@ export default async function SettingsPage() {
       </Card>
       <div className="mt-6">
         <GitHubAccessCard source={tokenSource} />
+      </div>
+      <div className="mt-6" id="environment-setup">
+        <EnvironmentSetupCard setup={settings().getEnvironmentSetup()} />
       </div>
       <div className="mt-6">
         <ContainerRuntimeCard choice={runtimeChoice} />

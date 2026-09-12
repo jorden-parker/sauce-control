@@ -11,6 +11,7 @@ const PORT = 3417,
  * the app runs one Comparison at a time, so files that start one cannot share the server.
  */
 export default defineConfig({
+  metadata: { dataDirectory },
   testDir: "e2e",
   use: { baseURL: `http://127.0.0.1:${PORT}` },
   webServer: {

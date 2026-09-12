@@ -14,6 +14,24 @@ import { removeAllInstances } from "@/instance/session";
 import { keychain } from "@/keychain";
 import { settings } from "@/settings/settings";
 
+export const saveEnvironmentSetupCommand = async (
+  command: string
+): Promise<{ error?: string }> => {
+  if (
+    typeof command !== "string" ||
+    command.length > 65_536 ||
+    command.includes("\0")
+  ) {
+    return {
+      error: "Enter a valid setup command of at most 65,536 characters.",
+    };
+  }
+  settings().saveEnvironmentSetupCommand(command.trim());
+  revalidatePath("/settings");
+  revalidatePath("/compare");
+  return {};
+};
+
 export const saveOrganisation = async (formData: FormData): Promise<void> => {
   const organisation = String(formData.get("organisation") ?? "").trim();
   if (organisation === "") {

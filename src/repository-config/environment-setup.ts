@@ -52,7 +52,7 @@ export const runEnvironmentSetup = async (
   options.signal?.throwIfAborted();
   if (command.includes("\0") || command.length > 65_536) {
     throw new EnvironmentSetupError(
-      "Environment setup command is invalid or too long. Update Repository configuration."
+      "Environment setup command is invalid or too long. Update Environment setup in Settings."
     );
   }
   const shell =
@@ -64,12 +64,12 @@ export const runEnvironmentSetup = async (
     );
   }
   return new Promise((resolve, reject) => {
-    let failure: Error | undefined,
-      text = "",
-      size = 0,
-      baseline: Record<string, string> | undefined,
+    let baseline: Record<string, string> | undefined,
+      failure: Error | undefined,
+      killTimer: ReturnType<typeof setTimeout> | undefined,
       result: Record<string, string> | undefined,
-      killTimer: ReturnType<typeof setTimeout> | undefined;
+      size = 0,
+      text = "";
     // Script text travels over stdin, never through process arguments or a file.
     const child = spawn(shell, fish ? ["-l"] : ["-l", "-s"], {
         cwd: options.directory ?? homedir(),
@@ -177,7 +177,7 @@ export const runEnvironmentSetup = async (
     child.on("error", () =>
       stop(
         new EnvironmentSetupError(
-          "Could not start environment setup. Check your login shell and Repository configuration."
+          "Could not start environment setup. Check your login shell and Environment setup in Settings."
         )
       )
     );
