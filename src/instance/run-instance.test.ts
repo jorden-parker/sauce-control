@@ -128,6 +128,7 @@ describe("running one Instance", () => {
 
     await runInstance({ git, runtime: runtime.adapter }, request());
 
+    expect(runtime.builds[0]?.dockerfile).not.toContain("pnpm install");
     expect(runtime.builds[0]?.dockerfile).toContain(
       'CMD ["node", "/opt/sauce-control-launcher.cjs"]'
     );

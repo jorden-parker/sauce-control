@@ -14,8 +14,10 @@ describe("generated Dockerfile", () => {
     expect(generateDockerfile()).not.toContain("pnpm run dev");
   });
 
-  it("installs at build time behind a secret mount, reading the registry from the Repository", () => {
-    const dockerfile = generateDockerfile();
+  it("installs at build time behind a secret mount only when a token is supplied", () => {
+    expect(generateDockerfile()).not.toContain("pnpm install");
+    expect(generateDockerfile()).not.toContain("--mount=type=secret");
+    const dockerfile = generateDockerfile(undefined, { registryAuth: true });
     expect(dockerfile).toContain(
       "RUN --mount=type=secret,id=NODE_AUTH_TOKEN,required=true,uid=1000"
     );

@@ -10,6 +10,7 @@ import type { RuntimeName } from "@/container-runtime/runtime-status";
 import type { RepositoryConfig } from "@/settings/settings-store";
 import type { GitHubRequestLog } from "@/github/request-log";
 import type { CommandRunner } from "@/shell/command-runner";
+import { buildFailureMessage } from "./build-diagnostics";
 import { cloneBranch } from "./clone-branch";
 import { generateDockerfile } from "./dockerfile";
 import { prepareDevelopmentContext } from "./development-context";
@@ -156,23 +157,26 @@ export const runInstance = async (
   request.onProgress?.("container");
   validateInstanceEnvironment(environment, config.port);
   const { context, development } = await prepareDevelopmentContext(
-    clonePath,
-    request
-  );
+      clonePath,
+      request
+    ),
+    secrets = buildSecrets(environment);
   try {
     await runtime.buildImage(request.runtime, {
       context,
-      dockerfile: generateDockerfile(),
+      dockerfile: generateDockerfile(undefined, {
+        registryAuth: secrets.some(({ id }) => id === "NODE_AUTH_TOKEN"),
+      }),
       labels: ownership,
-      secrets: buildSecrets(environment),
+      secrets,
       signal: request.signal,
       tag,
     });
-  } catch {
+  } catch (error) {
     request.signal?.throwIfAborted();
-    throw new ComparisonStartError(
-      "Could not prepare the development container. Check Container Runtime in Settings and the network connection."
-    );
+    // Build output can carry registry URLs or tokens; only fixed messages leave here.
+    // oxlint-disable-next-line preserve-caught-error -- Causes can contain credentials in build output.
+    throw new ComparisonStartError(buildFailureMessage(error));
   } finally {
     rmSync(context, { force: true, recursive: true });
   }

@@ -16,8 +16,16 @@ const REGISTRY_AUTH_INSTALL = [
   "    pnpm install --frozen-lockfile",
 ].join("\n");
 
+export interface DockerfileOptions {
+  /** Install at build time behind the secret mounts; only when NODE_AUTH_TOKEN is supplied. */
+  registryAuth?: boolean;
+}
+
 /** No repository commands or credentials enter image layers. */
-export const generateDockerfile = (_config?: unknown): string =>
+export const generateDockerfile = (
+  _config?: unknown,
+  { registryAuth = false }: DockerfileOptions = {}
+): string =>
   [
     "FROM node:22-bookworm-slim",
     "RUN corepack enable",
@@ -28,7 +36,7 @@ export const generateDockerfile = (_config?: unknown): string =>
     // Graph. These are disposable copies; the checkout remains untouched.
     `RUN chown -R node:node /app && find /app -type f -exec chmod a-w {} + && ${String.raw`find /app -type f \( -name package.json -o -name package-lock.json -o `}-name npm-shrinkwrap.json -o -name pnpm-lock.yaml -o -name yarn.lock -o ${String.raw`-name bun.lock -o -name bun.lockb \) -exec chmod u+w {} +`}`,
     "USER node",
-    REGISTRY_AUTH_INSTALL,
+    ...(registryAuth ? [REGISTRY_AUTH_INSTALL] : []),
     'CMD ["node", "/opt/sauce-control-launcher.cjs"]',
     "",
   ].join("\n");
