@@ -110,26 +110,50 @@ export const EnvironmentSetupCard = ({
               autoComplete="off"
               spellCheck={false}
               aria-describedby="environment-setup-help"
-              placeholder="pizzabox token update && pizzabox token env --repo pnpm && source ~/path/to/env"
+              placeholder="set -a; source ~/.config/work/npm.env; set +a"
               onChange={(event) => {
                 setCommand(event.target.value);
                 setMessage("");
                 setError("");
               }}
             />
-            <p
+            <div
               id="environment-setup-help"
-              className="text-sm text-muted-foreground"
+              className="flex flex-col gap-2 text-sm text-muted-foreground"
             >
-              Optional. Runs on your computer in your login shell, from your
-              home directory. Use an absolute path or ~/… when sourcing a file.
-              Leave empty to skip setup. Changes apply to the next Comparison.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Exported values override Environment Files. Command text is saved;
-              captured values are not. Browser login is supported; terminal
-              prompts are not.
-            </p>
+              <p>
+                Optional. Runs on your computer in your login shell from your
+                home directory before every new Comparison. Every variable it
+                exports reaches the Instances; NODE_AUTH_TOKEN reaches
+                dependency installation only. Exported values override
+                Environment Files. Command text is saved; captured values are
+                not.
+              </p>
+              <p>Examples, one per line or joined with &amp;&amp;:</p>
+              <ul className="list-disc space-y-1 pl-5">
+                <li>
+                  A file of <code>export NAME=value</code> lines:{" "}
+                  <code>source ~/.config/work/npm.env</code>
+                </li>
+                <li>
+                  A file of plain <code>NAME=value</code> lines:{" "}
+                  <code>set -a; source ~/.config/work/npm.env; set +a</code>
+                </li>
+                <li>
+                  A fresh token every time:{" "}
+                  <code>
+                    export NODE_AUTH_TOKEN=&quot;$(aws codeartifact
+                    get-authorization-token --domain my-domain --query
+                    authorizationToken --output text)&quot;
+                  </code>
+                </li>
+              </ul>
+              <p>
+                Only exported variables are captured. Use ~/… or an absolute
+                path. Browser login is supported; terminal prompts are not.
+                Leave empty to skip setup.
+              </p>
+            </div>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="packageRegistry">Package registry URL</Label>
@@ -143,21 +167,32 @@ export const EnvironmentSetupCard = ({
               autoComplete="off"
               spellCheck={false}
               aria-describedby="package-registry-help"
-              placeholder="https://example-123456789012.d.codeartifact.eu-west-1.amazonaws.com/npm/npm/"
+              placeholder="https://my-domain-123456789012.d.codeartifact.eu-west-1.amazonaws.com/npm/my-repo/"
               onChange={(event) => {
                 setRegistry(event.target.value);
                 setMessage("");
                 setError("");
               }}
             />
-            <p
+            <div
               id="package-registry-help"
-              className="text-sm text-muted-foreground"
+              className="flex flex-col gap-2 text-sm text-muted-foreground"
             >
-              Optional. Reaches dependency installation only, as NPM_REGISTRY,
-              together with NODE_AUTH_TOKEN. Leave empty to use the
-              repository&apos;s own .npmrc.
-            </p>
+              <p>
+                Optional. The private npm registry that NODE_AUTH_TOKEN
+                authenticates against. Dependency installation receives it as
+                NPM_REGISTRY together with the token; nothing else sees it and
+                it never enters an image or a Repository.
+              </p>
+              <p>
+                Use the full URL including the trailing slash, for example{" "}
+                <code>
+                  https://my-domain-123456789012.d.codeartifact.eu-west-1.amazonaws.com/npm/my-repo/
+                </code>
+                . Leave empty to use the registry from the repository&apos;s own
+                .npmrc.
+              </p>
+            </div>
           </div>
           <Button type="submit" className="self-start" disabled={pending}>
             {pending ? "Saving…" : "Save environment setup"}
