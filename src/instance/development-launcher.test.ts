@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
@@ -119,4 +120,128 @@ describe("installer failure feedback", () => {
       )
     ).toBe("installation-failed:unknown:absent:42");
   });
+});
+
+/** The launcher for real: only its socket path and working directory are redirected to a temporary place. */
+async function launchWithBridge(bindHost: string) {
+  const root = mkdtempSync(join(tmpdir(), "launcher-bridge-")),
+    socketPath = join(root, "launcher.sock"),
+    [port, bridgePort] = await Promise.all([freePort(), freePort()]),
+    net = await import("node:net"),
+    fakeProcess = Object.assign(new EventEmitter(), {
+      exit: () => {},
+      kill: process.kill.bind(process),
+    });
+  let child: ReturnType<typeof spawn> | undefined;
+  runInNewContext(DEVELOPMENT_LAUNCHER, {
+    Buffer,
+    JSON,
+    process: fakeProcess,
+    require: (name: string) => {
+      if (name === "node:fs") {
+        return { chmodSync: () => {}, unlinkSync: () => {} };
+      }
+      if (name === "node:net") {
+        return {
+          ...net,
+          createServer: (
+            options: object,
+            handler: (socket: unknown) => void
+          ) => {
+            const server = net.createServer(options, handler),
+              listen = server.listen.bind(server);
+            server.listen = ((target: unknown, ...rest: never[]) =>
+              listen(
+                (typeof target === "string" ? socketPath : target) as never,
+                ...rest
+              )) as typeof server.listen;
+            return server;
+          },
+        };
+      }
+      if (name === "node:child_process") {
+        return {
+          spawn: (
+            command: string,
+            args: string[],
+            options: Parameters<typeof spawn>[2]
+          ) => {
+            child = spawn(command, args, { ...options, cwd: root });
+            return child;
+          },
+        };
+      }
+      throw new Error("Unexpected module");
+    },
+    setTimeout,
+  });
+  const send = (payload: object) =>
+    new Promise<string>((resolve, reject) => {
+      const socket = net.createConnection(socketPath),
+        chunks: string[] = [];
+      socket.setEncoding("utf8");
+      socket.on("connect", () => socket.end(JSON.stringify(payload)));
+      socket.on("data", (chunk: string) => chunks.push(chunk));
+      socket.on("end", () => resolve(chunks.join("")));
+      socket.on("error", reject);
+    });
+  await delay(LAUNCHER_SETTLE_MS);
+  return {
+    bridgePort,
+    port,
+    send,
+    startCommand: `${JSON.stringify(process.execPath)} -e "require('node:http').createServer((q,r)=>r.end('bound to ${bindHost}')).listen(${port},'${bindHost}')"`,
+    stop: () => {
+      if (child?.pid) {
+        child.kill();
+      }
+      fakeProcess.emit("SIGTERM");
+      rmSync(root, { force: true, recursive: true });
+    },
+  };
+}
+
+const ANY_PORT = 0,
+  BRIDGE_TEST_TIMEOUT_MS = 10_000,
+  LAUNCHER_SETTLE_MS = 50,
+  freePort = async (): Promise<number> => {
+    const net = await import("node:net");
+    return new Promise((resolve) => {
+      const server = net.createServer();
+      server.listen(ANY_PORT, "127.0.0.1", () => {
+        const { port } = server.address() as { port: number };
+        server.close(() => resolve(port));
+      });
+    });
+  };
+
+describe("published port bridge", () => {
+  it.each(["localhost", "127.0.0.1", "0.0.0.0"])(
+    "reaches a development server bound to %s through the bridge port",
+    async (bindHost) => {
+      const launcher = await launchWithBridge(bindHost);
+      try {
+        await expect(
+          launcher.send({
+            bridgePort: launcher.bridgePort,
+            environment: {},
+            port: launcher.port,
+            startCommand: launcher.startCommand,
+          })
+        ).resolves.toMatch(/started$/u);
+        await expect
+          .poll(
+            () =>
+              fetch(`http://127.0.0.1:${launcher.bridgePort}/`)
+                .then((response) => response.text())
+                .catch(() => ""),
+            { timeout: BRIDGE_TEST_TIMEOUT_MS }
+          )
+          .toBe(`bound to ${bindHost}`);
+      } finally {
+        launcher.stop();
+      }
+    },
+    BRIDGE_TEST_TIMEOUT_MS
+  );
 });

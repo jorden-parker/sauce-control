@@ -1,9 +1,10 @@
 import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
-import type {
-  ContainerDetails,
-  RunRequest,
-  RuntimeAdapter,
+import {
+  type ContainerDetails,
+  type RunRequest,
+  type RuntimeAdapter,
+  bridgePortFor,
 } from "./runtime-adapter";
 import { DEVELOPMENT_TRANSPORT } from "@/instance/development-launcher";
 import { installationFailureMessage } from "@/instance/installation-diagnostics";
@@ -148,6 +149,7 @@ export const createCliRuntimeAdapter = (
           },
           response = await shell.run(name, command, {
             input: JSON.stringify({
+              bridgePort: bridgePortFor(request.port),
               environment,
               port: request.port,
               setupEnvironment: restarting
@@ -344,7 +346,10 @@ export const createCliRuntimeAdapter = (
           "Credential delivery requires the development launcher."
         );
       }
-      const { stdout } = await shell.run(
+      // The launcher bridges the published port to a development server; a plain container
+      // Publishes the application port itself.
+      const published = development ? bridgePortFor(port) : port,
+        { stdout } = await shell.run(
           name,
           [
             "run",
@@ -353,7 +358,7 @@ export const createCliRuntimeAdapter = (
             "none",
             ...HARDENING,
             "-p",
-            `127.0.0.1::${port}`,
+            `127.0.0.1::${published}`,
             ...Object.entries(labels).flatMap(([key, value]) => [
               "-l",
               `${key}=${value}`,
@@ -365,12 +370,12 @@ export const createCliRuntimeAdapter = (
         containerId = stdout.trim();
       try {
         request.signal?.throwIfAborted();
-        const published = await run(
+        const mapping = await run(
             name,
-            ["port", containerId, `${port}/tcp`],
+            ["port", containerId, `${published}/tcp`],
             request.signal
           ),
-          hostPort = Number(/:(\d+)\s*$/mu.exec(published.stdout)?.[1]);
+          hostPort = Number(/:(\d+)\s*$/mu.exec(mapping.stdout)?.[1]);
         if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65_535) {
           throw new Error("Could not find the Instance host port.");
         }

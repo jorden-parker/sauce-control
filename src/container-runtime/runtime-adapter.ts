@@ -36,6 +36,14 @@ export interface RunRequest {
   port: number;
 }
 
+/**
+ * The container port published to the host for a development Instance. The launcher relays it
+ * to the application's own port, so a development server bound only to localhost is reachable.
+ */
+export const BRIDGE_PORT = 45_173,
+  bridgePortFor = (port: number): number =>
+    port === BRIDGE_PORT ? BRIDGE_PORT + 1 : BRIDGE_PORT;
+
 /** What `inspect` reports about one container, trimmed to what the tool shows and cleans. */
 export interface ContainerDetails {
   containerId: string;

@@ -10,14 +10,16 @@ import { runInstance } from "./run-instance";
 import { removeAllInstances, removeSessionContainers } from "./session";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "hello-app"),
+  LOCALHOST_FIXTURE = join(import.meta.dirname, "fixtures", "localhost-app"),
   SMOKE_TIMEOUT_MS = 5 * 60 * 1000,
   /** Stands in for GitHub: "clones" by copying the fixture app. */
-  fixtureGit: CommandRunner = {
+  gitFor = (fixture: string): CommandRunner => ({
     run: (_command, args) => {
-      cpSync(FIXTURE, args.at(-1)!, { recursive: true });
+      cpSync(fixture, args.at(-1)!, { recursive: true });
       return Promise.resolve({ stdout: "" });
     },
-  },
+  }),
+  fixtureGit = gitFor(FIXTURE),
   available = async (name: "docker" | "podman"): Promise<boolean> => {
     const status = await cliRuntimeAdapter.detect(name);
     return status.installed && status.running;
@@ -94,6 +96,46 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
           "sauce-control.app=sauce-control"
         )
       ).resolves.toEqual([]);
+    },
+    SMOKE_TIMEOUT_MS
+  );
+  it(
+    "serves a development server bound only to localhost on the host port",
+    async ({ skip }) => {
+      if (!(await available(runtime))) {
+        skip();
+      }
+      const sessionId = `smoke-localhost-${Date.now()}`,
+        instance = await runInstance(
+          { git: gitFor(LOCALHOST_FIXTURE), runtime: cliRuntimeAdapter },
+          {
+            branch: "main",
+            config: {
+              crawl: DEFAULT_CRAWL_LIMITS,
+              installCommand: "",
+              pages: { added: [], removed: [] },
+              port: 5173,
+              startCommand: "",
+              useDotEnvLocal: false,
+            },
+            environment: {},
+            organisation: "sauce-labs",
+            readiness: { pollIntervalMs: 500, timeoutMs: 60_000 },
+            repository: "localhost-app",
+            runtime,
+            sessionId,
+            token: "unused",
+            workDirectory: mkdtempSync(join(tmpdir(), "smoke-")),
+          }
+        );
+      try {
+        const response = await fetch(`http://127.0.0.1:${instance.hostPort}/`);
+        await expect(response.text()).resolves.toBe(
+          "hello from localhost only"
+        );
+      } finally {
+        await removeSessionContainers(cliRuntimeAdapter, runtime, sessionId);
+      }
     },
     SMOKE_TIMEOUT_MS
   );

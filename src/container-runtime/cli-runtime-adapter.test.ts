@@ -282,6 +282,50 @@ describe("CLI adapter containers", () => {
 });
 
 describe("CLI adapter Instance lifecycle", () => {
+  it("publishes the bridge port for a development container and tells the launcher about it", async () => {
+    const calls: string[] = [],
+      payloads: { bridgePort?: number; probe?: boolean }[] = [],
+      adapter = createCliRuntimeAdapter(
+        {
+          run: (command, args, options) => {
+            calls.push([command, ...args].join(" "));
+            if (args[0] === "exec") {
+              const payload = JSON.parse(
+                options.input!
+              ) as (typeof payloads)[number];
+              payloads.push(payload);
+              return Promise.resolve({
+                stdout: payload.probe ? "ready" : "started",
+              });
+            }
+            return Promise.resolve({
+              stdout:
+                args[0] === "run"
+                  ? "abc123def\n"
+                  : args[0] === "port"
+                    ? "127.0.0.1:49153\n"
+                    : "[]",
+            });
+          },
+        },
+        mac
+      );
+    await expect(
+      adapter.runContainer("docker", {
+        development: { installCommand: "", startCommand: "npm run dev" },
+        environment: {},
+        image: "sauce-control/web-app:s1",
+        labels: { "sauce-control.session": "s1" },
+        port: 3000,
+      })
+    ).resolves.toEqual({ containerId: "abc123def", hostPort: 49_153 });
+    expect(calls).toContain(
+      "docker run -d --log-driver none --cap-drop ALL --security-opt no-new-privileges --memory 4g --cpus 2 --pids-limit 1024 --tmpfs /tmp -p 127.0.0.1::45173 -l sauce-control.session=s1 sauce-control/web-app:s1"
+    );
+    expect(calls).toContain("docker port abc123def 45173/tcp");
+    expect(payloads.find((payload) => !payload.probe)?.bridgePort).toBe(45_173);
+  });
+
   it("inspects containers into id, labels, state, host port, and creation time", async () => {
     const shell = fakeShell({
         outputs: {

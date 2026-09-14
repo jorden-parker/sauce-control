@@ -1,12 +1,12 @@
 import { INSTALLATION_ERROR_HINTS } from "./installation-diagnostics";
 
-/** Trusted PID 1. Input stays in memory; child output never reaches runtime logs. */
+/** Trusted PID 1. Input stays in memory; child output never reaches runtime logs. Relays the published bridge port to the development server's own port. */
 export const DEVELOPMENT_LAUNCHER = String.raw`
 const net = require('node:net');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const socketPath = '/tmp/sauce-control.sock';
-let child, busy = false, launched = false;
+let child, bridge, busy = false, launched = false;
 try { fs.unlinkSync(socketPath); } catch {}
 const base = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/home/node', NODE_ENV: 'development' };
 const errorCodes = ${JSON.stringify([...Object.keys(INSTALLATION_ERROR_HINTS).filter((code) => code !== "ELIFECYCLE"), "ELIFECYCLE"])};
@@ -64,6 +64,21 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
       child = execute(payload.startCommand, environment);
       child.once('error', () => process.exit(1));
       child.once('exit', () => process.exit(1));
+      // Development servers often bind only to localhost (Vite, say), which the published
+      // port cannot reach. The bridge accepts on every interface and relays to that loopback.
+      // Loopback is tried by address, since "localhost" resolves differently per runtime.
+      const relay = (downstream, hosts) => {
+        const upstream = net.connect({ autoSelectFamily: false, host: hosts[0], port: payload.port });
+        let connected = false;
+        upstream.once('connect', () => { connected = true; downstream.pipe(upstream); upstream.pipe(downstream); });
+        upstream.on('error', () => { if (!connected && hosts.length > 1) relay(downstream, hosts.slice(1)); else downstream.destroy(); });
+      };
+      bridge = net.createServer({}, downstream => {
+        downstream.on('error', () => {});
+        relay(downstream, ['127.0.0.1', '::1']);
+      });
+      bridge.on('error', () => process.exit(1));
+      bridge.listen(payload.bridgePort);
       launched = true; busy = false; socket.end('started');
     } catch { text = ''; busy = false; socket.end('invalid-request'); }
   });
@@ -71,7 +86,7 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
 server.listen(socketPath, () => fs.chmodSync(socketPath, 0o600));
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
   if (child?.pid) { try { process.kill(-child.pid, signal); } catch {} }
-  server.close(); setTimeout(() => process.exit(0), 500).unref();
+  bridge?.close(); server.close(); setTimeout(() => process.exit(0), 500).unref();
 });
 process.on('uncaughtException', () => process.exit(1));
 process.on('unhandledRejection', () => process.exit(1));
