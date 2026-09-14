@@ -14,8 +14,21 @@ import { removeAllInstances } from "@/instance/session";
 import { keychain } from "@/keychain";
 import { settings } from "@/settings/settings";
 
+const isRegistryUrl = (registry: string): boolean => {
+  if (registry === "") {
+    return true;
+  }
+  try {
+    const url = new URL(registry);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
 export const saveEnvironmentSetupCommand = async (
-  command: string
+  command: string,
+  registry = ""
 ): Promise<{ error?: string }> => {
   if (
     typeof command !== "string" ||
@@ -26,7 +39,15 @@ export const saveEnvironmentSetupCommand = async (
       error: "Enter a valid setup command of at most 65,536 characters.",
     };
   }
+  if (
+    typeof registry !== "string" ||
+    registry.length > 2048 ||
+    !isRegistryUrl(registry.trim())
+  ) {
+    return { error: "Enter a package registry URL starting with https://." };
+  }
   settings().saveEnvironmentSetupCommand(command.trim());
+  settings().savePackageRegistry(registry.trim());
   revalidatePath("/settings");
   revalidatePath("/compare");
   return {};

@@ -316,6 +316,12 @@ export const startCurrentComparison = async (
     const work = async () => {
       try {
         let setupEnvironment: Record<string, string> | undefined;
+        if ("config" in request && setup.registry !== "") {
+          request.environment = {
+            ...request.environment,
+            NPM_REGISTRY: setup.registry,
+          };
+        }
         if (setupCommand?.trim()) {
           attempt.progress.beginEnvironmentSetup();
           setupEnvironment = await runEnvironmentSetup(setupCommand, {

@@ -73,6 +73,7 @@ describe("currentComparison", () => {
   afterEach(async () => {
     await comparison.stopCurrentComparison();
     settings.settings().saveEnvironmentSetupCommand("");
+    settings.settings().savePackageRegistry("");
     const store = settings.settings(),
       repository = store.getComparisonSelection()?.repository;
     if (repository) {
@@ -144,6 +145,26 @@ describe("currentComparison", () => {
       );
     }
   );
+
+  it("adds the saved package registry as NPM_REGISTRY, below setup exports", async () => {
+    const store = settings.settings();
+    store.saveOrganisation("example");
+    store.saveComparisonSelection({
+      baseBranch: "main",
+      repository: "web-app",
+      targetBranch: "feature",
+    });
+    store.savePackageRegistry("https://registry.example.test/npm/npm/");
+    await comparison.startCurrentComparison();
+    expect(runComparison).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: expect.objectContaining({
+          NPM_REGISTRY: "https://registry.example.test/npm/npm/",
+        }),
+      })
+    );
+  });
 
   it("uses explicitly saved Repository configuration", async () => {
     const store = settings.settings(),
@@ -312,6 +333,7 @@ describe("currentComparison", () => {
           { command: "private-command-one", repository: "one" },
           { command: "private-command-two", repository: "two" },
         ],
+        registry: "",
       });
     await comparison.startCurrentComparison();
     expect(runComparison).not.toHaveBeenCalled();

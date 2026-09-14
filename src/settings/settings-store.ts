@@ -43,6 +43,7 @@ export interface ScenarioConfig {
 export interface SettingsStore {
   getEnvironmentSetup: () => EnvironmentSetup;
   saveEnvironmentSetupCommand: (command: string) => void;
+  savePackageRegistry: (registry: string) => void;
   getScenarioConfig: (repository: string) => ScenarioConfig;
   saveScenarioConfig: (repository: string, config: ScenarioConfig) => void;
   close: () => void;
@@ -63,12 +64,15 @@ export interface SettingsStore {
 export interface EnvironmentSetup {
   command: string;
   conflicts: { repository: string; command: string }[];
+  /** Package registry URL mounted into dependency installation as `NPM_REGISTRY`; empty means the Repository's own `.npmrc`. */
+  registry: string;
 }
 
 const CODE_DIRECTORY_KEY = "code-directory",
   COMPARISON_SELECTION_KEY = "comparison-selection",
   CONTAINER_RUNTIME_KEY = "container-runtime",
   ORGANISATION_KEY = "organisation",
+  PACKAGE_REGISTRY_KEY = "package-registry",
   repositoryConfigKey = (repository: string): string =>
     `repository-config:${repository}`,
   /** Configs saved before crawl limits and manual Pages existed get the defaults on read. */
@@ -129,8 +133,11 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
         : [];
     },
     getEnvironmentSetup: () => {
-      const saved = read("environment-setup-command");
-      if (saved !== undefined) return { command: saved, conflicts: [] };
+      const saved = read("environment-setup-command"),
+        registry = read(PACKAGE_REGISTRY_KEY) ?? "";
+      if (saved !== undefined) {
+        return { command: saved, conflicts: [], registry };
+      }
       const legacy: EnvironmentSetup["conflicts"] = [];
       for (const row of database
         .prepare(
@@ -144,16 +151,18 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
           config.environmentSetupCommand.trim()
         ) {
           legacy.push({
-            repository: String(row.key).slice("repository-config:".length),
             command: config.environmentSetupCommand.trim(),
+            repository: String(row.key).slice("repository-config:".length),
           });
         }
       }
       const commands = new Set(legacy.map(({ command }) => command));
-      if (commands.size > 1) return { command: "", conflicts: legacy };
+      if (commands.size > 1) {
+        return { command: "", conflicts: legacy, registry };
+      }
       const command = [...commands][0] ?? "";
       upsert.run("environment-setup-command", command);
-      return { command, conflicts: [] };
+      return { command, conflicts: [], registry };
     },
     getOrganisation: () => read(ORGANISATION_KEY),
     getRepositoryConfig: (repository) => {
@@ -195,6 +204,9 @@ export const openSettingsStore = (databasePath: string): SettingsStore => {
     },
     saveOrganisation: (organisation) => {
       upsert.run(ORGANISATION_KEY, organisation);
+    },
+    savePackageRegistry: (registry) => {
+      upsert.run(PACKAGE_REGISTRY_KEY, registry);
     },
     saveRepositoryConfig: (repository, config) => {
       upsert.run(repositoryConfigKey(repository), JSON.stringify(config));

@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { EnvironmentSetup } from "@/settings/settings-store";
@@ -20,6 +21,7 @@ export const EnvironmentSetupCard = ({
   setup: EnvironmentSetup;
 }) => {
   const [command, setCommand] = useState(setup.command),
+    [registry, setRegistry] = useState(setup.registry),
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [pending, transition] = useTransition();
@@ -39,10 +41,13 @@ export const EnvironmentSetupCard = ({
             event.preventDefault();
             transition(async () => {
               try {
-                const result = await saveEnvironmentSetupCommand(command);
+                const result = await saveEnvironmentSetupCommand(
+                  command,
+                  registry
+                );
                 setError(result.error ?? "");
                 if (!result.error) {
-                  setMessage("Setup command saved for all repositories.");
+                  setMessage("Environment setup saved for all repositories.");
                 }
               } catch {
                 setError("Could not save the setup command. Try again.");
@@ -126,8 +131,36 @@ export const EnvironmentSetupCard = ({
               prompts are not.
             </p>
           </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="packageRegistry">Package registry URL</Label>
+            <Input
+              id="packageRegistry"
+              name="packageRegistry"
+              type="url"
+              value={registry}
+              disabled={pending}
+              maxLength={2048}
+              autoComplete="off"
+              spellCheck={false}
+              aria-describedby="package-registry-help"
+              placeholder="https://example-123456789012.d.codeartifact.eu-west-1.amazonaws.com/npm/npm/"
+              onChange={(event) => {
+                setRegistry(event.target.value);
+                setMessage("");
+                setError("");
+              }}
+            />
+            <p
+              id="package-registry-help"
+              className="text-sm text-muted-foreground"
+            >
+              Optional. Reaches dependency installation only, as NPM_REGISTRY,
+              together with NODE_AUTH_TOKEN. Leave empty to use the
+              repository&apos;s own .npmrc.
+            </p>
+          </div>
           <Button type="submit" className="self-start" disabled={pending}>
-            {pending ? "Saving…" : "Save setup command"}
+            {pending ? "Saving…" : "Save environment setup"}
           </Button>
           {message ? (
             <p role="status" className="text-sm text-muted-foreground">

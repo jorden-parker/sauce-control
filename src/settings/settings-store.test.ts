@@ -23,6 +23,7 @@ describe("central environment setup", () => {
     expect(store.getEnvironmentSetup()).toEqual({
       command: "export TOKEN=old",
       conflicts: [],
+      registry: "",
     });
     store.saveEnvironmentSetupCommand("");
     store.saveOrganisation("different-company");
@@ -31,6 +32,7 @@ describe("central environment setup", () => {
     expect(reopened.getEnvironmentSetup()).toEqual({
       command: "",
       conflicts: [],
+      registry: "",
     });
     reopened.close();
   });
@@ -44,13 +46,28 @@ describe("central environment setup", () => {
         { command: "export TOKEN=one", repository: "one" },
         { command: "export TOKEN=two", repository: "two" },
       ],
+      registry: "",
     });
     store.saveEnvironmentSetupCommand("export TOKEN=shared");
     expect(store.getEnvironmentSetup()).toEqual({
       command: "export TOKEN=shared",
       conflicts: [],
+      registry: "",
     });
     store.close();
+  });
+  it("keeps the package registry URL alongside the shared command", () => {
+    const path = freshDatabasePath(),
+      store = openSettingsStore(path);
+    store.savePackageRegistry("https://registry.example.test/npm/npm/");
+    store.close();
+    const reopened = openSettingsStore(path);
+    expect(reopened.getEnvironmentSetup()).toEqual({
+      command: "",
+      conflicts: [],
+      registry: "https://registry.example.test/npm/npm/",
+    });
+    reopened.close();
   });
 });
 
