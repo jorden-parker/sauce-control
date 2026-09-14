@@ -9,15 +9,16 @@
 const REGISTRY_AUTH_INSTALL = [
   "RUN --mount=type=secret,id=NODE_AUTH_TOKEN,required=true,uid=1000 \\",
   "    --mount=type=secret,id=NPM_REGISTRY,uid=1000 \\",
-  '    NODE_AUTH_TOKEN="$(cat /run/secrets/NODE_AUTH_TOKEN)" \\',
-  '    REGISTRY="$(cat /run/secrets/NPM_REGISTRY 2>/dev/null || pnpm config get registry)" \\',
+  // Assignments are separate commands: `A=x B=y cmd` expands $A before assigning it.
+  '    NODE_AUTH_TOKEN="$(cat /run/secrets/NODE_AUTH_TOKEN)" && \\',
+  '    REGISTRY="$(cat /run/secrets/NPM_REGISTRY 2>/dev/null || pnpm config get registry)" && \\',
   '    env npm_config_registry="${REGISTRY}" \\',
   '    pnpm_config__auth="{\\"${REGISTRY}\\":{\\"@\\":{\\"authToken\\":\\"${NODE_AUTH_TOKEN}\\"}}}" \\',
   "    pnpm install --frozen-lockfile",
 ].join("\n");
 
 export interface DockerfileOptions {
-  /** Install at build time behind the secret mounts; only when NODE_AUTH_TOKEN is supplied. */
+  /** Install at build time behind the secret mounts; only for pnpm Repositories given NODE_AUTH_TOKEN. */
   registryAuth?: boolean;
 }
 

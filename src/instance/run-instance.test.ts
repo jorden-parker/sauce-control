@@ -136,7 +136,7 @@ describe("running one Instance", () => {
 
   it("hands NODE_AUTH_TOKEN to the build as a secret mount, never in the context", async () => {
     const runtime = fakeRuntime(),
-      git = fakeGit({ "package.json": "{}" });
+      git = fakeGit({ "package.json": "{}", "pnpm-lock.yaml": "" });
 
     await runInstance(
       { git, runtime: runtime.adapter },
@@ -154,10 +154,26 @@ describe("running one Instance", () => {
       { id: "NODE_AUTH_TOKEN", value: "synthetic-token" },
       { id: "NPM_REGISTRY", value: "https://registry.example.test/npm/npm/" },
     ]);
+    expect(runtime.builds[0]?.dockerfile).toContain(
+      "--mount=type=secret,id=NODE_AUTH_TOKEN,required=true"
+    );
     expect(runtime.builds[0]?.dockerfile).not.toContain("synthetic-token");
     expect(runtime.builds[0]?.dockerfile).not.toContain(
       "registry.example.test"
     );
+  });
+
+  it("keeps installation at runtime, without secrets, for Repositories without a pnpm lockfile", async () => {
+    const runtime = fakeRuntime(),
+      git = fakeGit({ "package.json": "{}" });
+
+    await runInstance(
+      { git, runtime: runtime.adapter },
+      { ...request(), environment: { NODE_AUTH_TOKEN: "synthetic-token" } }
+    );
+
+    expect(runtime.builds[0]?.dockerfile).not.toContain("--mount=type=secret");
+    expect(runtime.builds[0]?.secrets).toEqual([]);
   });
 
   it("labels the container with the app, session, Repository, and branch and passes the port and environment", async () => {

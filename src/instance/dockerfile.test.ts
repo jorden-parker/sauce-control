@@ -25,7 +25,10 @@ describe("generated Dockerfile", () => {
       "--mount=type=secret,id=NPM_REGISTRY,uid=1000"
     );
     expect(dockerfile).toContain(
-      'REGISTRY="$(cat /run/secrets/NPM_REGISTRY 2>/dev/null || pnpm config get registry)"'
+      'NODE_AUTH_TOKEN="$(cat /run/secrets/NODE_AUTH_TOKEN)" && \\'
+    );
+    expect(dockerfile).toContain(
+      'REGISTRY="$(cat /run/secrets/NPM_REGISTRY 2>/dev/null || pnpm config get registry)" && \\'
     );
     expect(dockerfile).toContain('npm_config_registry="${REGISTRY}"');
     expect(dockerfile).toContain(

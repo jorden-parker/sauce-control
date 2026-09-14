@@ -1,5 +1,5 @@
 import { ComparisonStartError } from "@/comparison/comparison-start-error";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
@@ -160,13 +160,16 @@ export const runInstance = async (
       clonePath,
       request
     ),
-    secrets = buildSecrets(environment);
+    // Secrets only join a build whose Dockerfile mounts them; a plain build stays
+    // Compatible with runtimes that lack BuildKit.
+    registryAuth =
+      environment.NODE_AUTH_TOKEN !== undefined &&
+      existsSync(join(context, "source", "pnpm-lock.yaml")),
+    secrets = registryAuth ? buildSecrets(environment) : [];
   try {
     await runtime.buildImage(request.runtime, {
       context,
-      dockerfile: generateDockerfile(undefined, {
-        registryAuth: secrets.some(({ id }) => id === "NODE_AUTH_TOKEN"),
-      }),
+      dockerfile: generateDockerfile(undefined, { registryAuth }),
       labels: ownership,
       secrets,
       signal: request.signal,

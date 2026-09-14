@@ -9,14 +9,19 @@ const GENERIC =
     "The Container Runtime cannot build with secrets. Docker needs the buildx plugin (for example `brew install docker-buildx && docker buildx install`); Podman 4.2 or newer works as is. Then run a new Comparison.",
   SECRET_MISSING =
     "NODE_AUTH_TOKEN did not reach the image build. Export it from the Environment Setup Command or add it to a selected Environment File, then run a new Comparison.",
-  stderrOf = (error: unknown): string =>
-    typeof error === "object" && error !== null && "stderr" in error
-      ? String(error.stderr)
+  /** Podman prints installer output on stdout, Docker on stderr; classify both. */
+  outputOf = (error: unknown): string =>
+    typeof error === "object" && error !== null
+      ? ["stdout", "stderr"]
+          .map((stream) =>
+            stream in error ? String(error[stream as keyof typeof error]) : ""
+          )
+          .join("\n")
       : "";
 
 /** Classifies a failed `build` by fixed markers in its stderr; never quotes the output. */
 export const buildFailureMessage = (error: unknown): string => {
-  const stderr = stderrOf(error);
+  const stderr = outputOf(error);
   if (
     /unknown flag: --secret|--secret.*(?:unknown|not supported)|buildx component is missing|the --mount option requires BuildKit|Dockerfile parse error.*--mount/iu.test(
       stderr

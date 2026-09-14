@@ -29,6 +29,15 @@ describe("build failure diagnostics", () => {
     expect(message).not.toContain("registry.example.test");
     expect(message).not.toContain("abc");
   });
+  it("reads installer codes from stdout as well", () => {
+    expect(
+      buildFailureMessage(
+        Object.assign(new Error("build"), {
+          stdout: "Error: ERR_PNPM_NO_LOCKFILE\n",
+        })
+      )
+    ).toContain("ERR_PNPM_NO_LOCKFILE");
+  });
   it("falls back to the generic message", () => {
     expect(buildFailureMessage(new Error("boom"))).toContain(
       "Could not prepare the development container"
