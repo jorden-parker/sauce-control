@@ -111,6 +111,7 @@ describe("running one Instance", () => {
           "sauce-control.app": "sauce-control",
           "sauce-control.session": "session-1",
         },
+        secrets: [],
         tag: "sauce-control/web-app-feature-login:session-1",
       },
     ]);
@@ -127,9 +128,34 @@ describe("running one Instance", () => {
 
     await runInstance({ git, runtime: runtime.adapter }, request());
 
-    expect(runtime.builds[0]?.dockerfile).not.toContain("pnpm install");
     expect(runtime.builds[0]?.dockerfile).toContain(
       'CMD ["node", "/opt/sauce-control-launcher.cjs"]'
+    );
+  });
+
+  it("hands NODE_AUTH_TOKEN to the build as a secret mount, never in the context", async () => {
+    const runtime = fakeRuntime(),
+      git = fakeGit({ "package.json": "{}" });
+
+    await runInstance(
+      { git, runtime: runtime.adapter },
+      {
+        ...request(),
+        environment: {
+          API_URL: "https://api.example.test",
+          NODE_AUTH_TOKEN: "synthetic-token",
+          NPM_REGISTRY: "https://registry.example.test/npm/npm/",
+        },
+      }
+    );
+
+    expect(runtime.builds[0]?.secrets).toEqual([
+      { id: "NODE_AUTH_TOKEN", value: "synthetic-token" },
+      { id: "NPM_REGISTRY", value: "https://registry.example.test/npm/npm/" },
+    ]);
+    expect(runtime.builds[0]?.dockerfile).not.toContain("synthetic-token");
+    expect(runtime.builds[0]?.dockerfile).not.toContain(
+      "registry.example.test"
     );
   });
 

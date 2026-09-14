@@ -230,7 +230,15 @@ export const createCliRuntimeAdapter = (
     };
 
   return {
-    buildImage: async (name, { context, dockerfile, labels, tag, signal }) => {
+    buildImage: async (
+      name,
+      { context, dockerfile, labels, secrets = [], tag, signal }
+    ) => {
+      // Secret values travel to the build in the child's environment only, never as
+      // Arguments; `env=` forwards each into its `RUN --mount=type=secret` step.
+      const environment = Object.fromEntries(
+        secrets.map(({ id, value }) => [id, value])
+      );
       await shell.run(
         name,
         [
@@ -241,10 +249,18 @@ export const createCliRuntimeAdapter = (
             "--label",
             `${key}=${value}`,
           ]),
+          ...secrets.flatMap(({ id }) => ["--secret", `id=${id},env=${id}`]),
           ...(dockerfile === undefined ? [] : ["-f", "-"]),
           context,
         ],
-        { input: dockerfile, signal, timeoutMs: BUILD_TIMEOUT_MS }
+        {
+          ...(secrets.length > 0
+            ? { environment: { ...environment, DOCKER_BUILDKIT: "1" } }
+            : {}),
+          input: dockerfile,
+          signal,
+          timeoutMs: BUILD_TIMEOUT_MS,
+        }
       );
     },
     detect: async (name, signal): Promise<RuntimeStatus> => {

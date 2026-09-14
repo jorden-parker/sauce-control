@@ -205,6 +205,27 @@ describe("CLI adapter containers", () => {
     expect(shell.inputs).toEqual(["FROM scratch\n"]);
   });
 
+  it("passes build secrets through the environment and a mount id, never as an argument", async () => {
+    const shell = fakeShell({
+        outputs: {
+          "docker build -t tag --secret id=NODE_AUTH_TOKEN,env=NODE_AUTH_TOKEN -f - /tmp/clone":
+            "",
+        },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await adapter.buildImage("docker", {
+      context: "/tmp/clone",
+      dockerfile: "FROM scratch\n",
+      labels: {},
+      secrets: [{ id: "NODE_AUTH_TOKEN", value: "synthetic-token" }],
+      tag: "tag",
+    });
+    expect(shell.calls[0]).not.toContain("synthetic-token");
+    expect(shell.environments).toEqual([
+      { DOCKER_BUILDKIT: "1", NODE_AUTH_TOKEN: "synthetic-token" },
+    ]);
+  });
+
   it("builds with the context's own Dockerfile otherwise", async () => {
     const shell = fakeShell({
         outputs: { "docker build -t tag /tmp/clone": "" },

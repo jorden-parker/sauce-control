@@ -2,7 +2,10 @@ import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { RuntimeAdapter } from "@/container-runtime/runtime-adapter";
+import type {
+  BuildSecret,
+  RuntimeAdapter,
+} from "@/container-runtime/runtime-adapter";
 import type { RuntimeName } from "@/container-runtime/runtime-status";
 import type { RepositoryConfig } from "@/settings/settings-store";
 import type { GitHubRequestLog } from "@/github/request-log";
@@ -108,9 +111,16 @@ const slug = (text: string): string =>
         await poll();
       };
     await poll();
-  };
+  },
+  /** Clone, build, and start one branch as an Instance; resolves once it listens on its port. */
+  /** Registry credentials the Dockerfile's install step mounts; absent variables are simply not mounted. */
+  BUILD_SECRET_IDS = ["NODE_AUTH_TOKEN", "NPM_REGISTRY"] as const,
+  buildSecrets = (environment: Record<string, string>): BuildSecret[] =>
+    BUILD_SECRET_IDS.flatMap((id) => {
+      const value = environment[id];
+      return value === undefined ? [] : [{ id, value }];
+    });
 
-/** Clone, build, and start one branch as an Instance; resolves once it listens on its port. */
 export const runInstance = async (
   { git, requestLog, runtime }: InstanceDependencies,
   request: InstanceRequest
@@ -154,6 +164,7 @@ export const runInstance = async (
       context,
       dockerfile: generateDockerfile(),
       labels: ownership,
+      secrets: buildSecrets(environment),
       signal: request.signal,
       tag,
     });

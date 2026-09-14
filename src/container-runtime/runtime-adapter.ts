@@ -7,7 +7,18 @@ export interface BuildRequest {
   /** Inline Dockerfile when the Repository has none; otherwise the context's own. */
   dockerfile: string | undefined;
   labels: Record<string, string>;
+  /**
+   * Build-time secrets exposed to `RUN --mount=type=secret,id=<id>` steps only.
+   * They never enter image layers, arguments or the saved build context.
+   */
+  secrets?: BuildSecret[];
   tag: string;
+}
+
+export interface BuildSecret {
+  /** Mount id inside the Dockerfile, e.g. `NODE_AUTH_TOKEN`. */
+  id: string;
+  value: string;
 }
 
 export interface RunRequest {
