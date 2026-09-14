@@ -60,7 +60,7 @@ Use Server-Sent Events to push progress updates to the browser as they happen. S
 
 ## Verification
 
-The unit and integration suite passes when run sequentially (`pnpm test --no-file-parallelism`), avoiding concurrent Docker image-prune conflicts. Additional focused tests verify notification before delayed cleanup, cancellation through page analysis, and preventing a new startup during cleanup.
+The unit and integration suite passes in parallel: each smoke file owns its containers under its own app label, and images are removed by id rather than pruned, so files never conflict on Docker's single prune lock. Additional focused tests verify notification before delayed cleanup, cancellation through page analysis, and preventing a new startup during cleanup.
 
 All 19 browser tests pass, including startup streaming, navigation and refresh, cancellation, retained progress, and retry. The rendered panel and expandable messages were inspected with no browser runtime errors.
 

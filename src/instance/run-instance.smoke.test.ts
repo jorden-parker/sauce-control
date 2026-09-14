@@ -6,8 +6,13 @@ import { describe, expect, it } from "vitest";
 import { cliRuntimeAdapter } from "@/container-runtime/cli-runtime-adapter";
 import { RUNTIME_NAMES } from "@/container-runtime/runtime-status";
 import type { CommandRunner } from "@/shell/command-runner";
+import { APP_LABEL, appLabel, appLabelValue } from "./labels";
 import { runInstance } from "./run-instance";
 import { removeAllInstances, removeSessionContainers } from "./session";
+
+// Each smoke file owns its containers under its own app label, so the sweeps of files running
+// In parallel never remove one another's Instances.
+process.env.SAUCE_CONTROL_APP_LABEL = `smoke-instance-${process.pid}`;
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "hello-app"),
   LOCALHOST_FIXTURE = join(import.meta.dirname, "fixtures", "localhost-app"),
@@ -65,7 +70,7 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
             environment: {},
             image: `sauce-control/hello-app-main:${sessionId}`,
             labels: {
-              "sauce-control.app": "sauce-control",
+              [APP_LABEL]: appLabelValue(),
               "sauce-control.session": `${sessionId}-crashed`,
             },
             port: 3000,
@@ -91,10 +96,7 @@ describe.each(RUNTIME_NAMES)("real %s Instance", (runtime) => {
         removeAllInstances(cliRuntimeAdapter, runtime)
       ).resolves.toBeGreaterThanOrEqual(1);
       await expect(
-        cliRuntimeAdapter.listContainers(
-          runtime,
-          "sauce-control.app=sauce-control"
-        )
+        cliRuntimeAdapter.listContainers(runtime, appLabel())
       ).resolves.toEqual([]);
     },
     SMOKE_TIMEOUT_MS

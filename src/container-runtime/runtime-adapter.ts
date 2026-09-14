@@ -81,7 +81,7 @@ export interface RuntimeAdapter {
   ) => Promise<ContainerDetails[]>;
   /** Ids of containers, running or not, carrying the label (`key` or `key=value`). */
   listContainers: (name: RuntimeName, label: string) => Promise<string[]>;
-  /** Removes every unused image carrying the label (`key` or `key=value`). */
+  /** Removes every image carrying the label (`key` or `key=value`); none is not an error. */
   removeImages: (name: RuntimeName, label: string) => Promise<void>;
   /** Force-removes the containers; missing ids are not an error. */
   removeContainers: (

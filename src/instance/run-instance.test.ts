@@ -14,8 +14,9 @@ import { runInstance } from "./run-instance";
 /** In-memory docker: records builds and runs, answers readiness from `listening`. */
 const fakeRuntime = ({
     listening = true,
+    reason,
     running = true,
-  }: { listening?: boolean; running?: boolean } = {}) => {
+  }: { listening?: boolean; reason?: string; running?: boolean } = {}) => {
     const builds: BuildRequest[] = [],
       removed: string[][] = [],
       runs: RunRequest[] = [],
@@ -28,6 +29,7 @@ const fakeRuntime = ({
           Promise.resolve({
             installed: true,
             name,
+            ...(reason === undefined ? {} : { reason }),
             running,
             version: "29.7.2",
           }),
@@ -213,6 +215,20 @@ describe("running one Instance when the Container Runtime is stopped", () => {
       "docker is not running. Start it from Settings and try again."
     );
     expect(git.calls).toBe(0);
+  });
+
+  it("includes why the runtime looked stopped when the adapter knows", async () => {
+    const runtime = fakeRuntime({
+        reason: "Command timed out after 10000ms.",
+        running: false,
+      }),
+      git = fakeGit({});
+
+    await expect(
+      runInstance({ git, runtime: runtime.adapter }, request())
+    ).rejects.toThrow(
+      "docker is not running (`docker info` failed: Command timed out after 10000ms.). Start it from Settings and try again."
+    );
   });
 });
 

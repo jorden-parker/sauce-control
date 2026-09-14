@@ -5,7 +5,14 @@ export const RUNTIME_NAMES: readonly RuntimeName[] = ["docker", "podman"];
 /** What the shared CLI surface reports about one Container Runtime. */
 export type RuntimeStatus =
   | { installed: false; name: RuntimeName }
-  | { installed: true; name: RuntimeName; running: boolean; version: string };
+  | {
+      installed: true;
+      name: RuntimeName;
+      /** Why `info` failed when not running: a daemon that is up but unreachable looks the same as one that is stopped. */
+      reason?: string;
+      running: boolean;
+      version: string;
+    };
 
 export type InstalledRuntime = Extract<RuntimeStatus, { installed: true }>;
 

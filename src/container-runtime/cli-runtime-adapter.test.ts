@@ -8,9 +8,12 @@ import { RUNTIME_NAMES } from "./runtime-status";
 
 /** Fake shell: scripted stdout per "command args", `hang` commands only finish via the timeout option. */
 const fakeShell = ({
+    failures = {},
     hang = [],
     outputs,
   }: {
+    /** Commands that exit non-zero, with their stderr. */
+    failures?: Record<string, string>;
     hang?: string[];
     outputs: Record<string, string>;
   }): CommandRunner & {
@@ -38,6 +41,16 @@ const fakeShell = ({
             );
           });
         }
+        const stderr = failures[line];
+        if (stderr !== undefined) {
+          return Promise.reject(
+            Object.assign(new Error(`Command failed: ${command}`), {
+              code: 125,
+              stderr,
+              stdout: "",
+            })
+          );
+        }
         const stdout = outputs[line];
         return stdout === undefined
           ? Promise.reject(
@@ -64,8 +77,28 @@ describe("CLI adapter detection", () => {
     await expect(adapter.detect("docker")).resolves.toEqual({
       installed: true,
       name: "docker",
+      reason: "timed out after 20ms",
       running: false,
       version: "29.7.2",
+    });
+  });
+
+  it("names why podman info failed so a machine that is up but unreachable is not mistaken for stopped", async () => {
+    const shell = fakeShell({
+        failures: {
+          "podman info":
+            "Cannot connect to Podman. Please verify your connection to the Linux system\nError: unable to connect to Podman socket: ssh: handshake failed",
+        },
+        outputs: { "podman --version": "podman version 5.6.0\n" },
+      }),
+      adapter = createCliRuntimeAdapter(shell, mac);
+    await expect(adapter.detect("podman")).resolves.toEqual({
+      installed: true,
+      name: "podman",
+      reason:
+        "Error: unable to connect to Podman socket: ssh: handshake failed",
+      running: false,
+      version: "5.6.0",
     });
   });
 });
@@ -260,7 +293,9 @@ describe("CLI adapter containers", () => {
   it("lists containers by label, running or not, and force-removes by id", async () => {
     const shell = fakeShell({
         outputs: {
-          "docker image prune -af --filter label=sauce-control.session": "",
+          "docker image ls -q --filter label=sauce-control.session":
+            "img1\nimg1\nimg2\n",
+          "docker image rm -f img1 img2": "",
           "docker ps -aq --no-trunc --filter label=sauce-control.session":
             "abc\ndef\n",
           "docker rm -f abc def": "",
@@ -276,7 +311,8 @@ describe("CLI adapter containers", () => {
     expect(shell.calls).toEqual([
       "docker ps -aq --no-trunc --filter label=sauce-control.session",
       "docker rm -f abc def",
-      "docker image prune -af --filter label=sauce-control.session",
+      "docker image ls -q --filter label=sauce-control.session",
+      "docker image rm -f img1 img2",
     ]);
   });
 });

@@ -11,6 +11,10 @@ import { openSettingsStore } from "@/settings/settings-store";
 import { readEnvironmentFiles } from "@/repository-config/environment-files";
 import { runEnvironmentSetup } from "@/repository-config/environment-setup";
 
+// Each smoke file owns its containers under its own app label, so the sweeps of files running
+// In parallel never remove one another's Instances.
+process.env.SAUCE_CONTROL_APP_LABEL = `smoke-delivery-${process.pid}`;
+
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 

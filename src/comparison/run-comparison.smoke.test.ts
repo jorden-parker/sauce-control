@@ -8,6 +8,10 @@ import { RUNTIME_NAMES } from "@/container-runtime/runtime-status";
 import type { CommandRunner } from "@/shell/command-runner";
 import { runComparison } from "./run-comparison";
 
+// Each smoke file owns its containers under its own app label, so the sweeps of files running
+// In parallel never remove one another's Instances.
+process.env.SAUCE_CONTROL_APP_LABEL = `smoke-comparison-${process.pid}`;
+
 const FIXTURE = join(
     import.meta.dirname,
     "..",

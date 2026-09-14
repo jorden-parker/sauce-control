@@ -85,8 +85,12 @@ const slug = (text: string): string =>
       );
     }
     if (!status.running) {
+      const cause =
+        status.reason === undefined
+          ? ""
+          : ` (\`${name} info\` failed: ${status.reason})`;
       throw new ComparisonStartError(
-        `${name} is not running. Start it from Settings and try again.`
+        `${name} is not running${cause}. Start it from Settings and try again.`
       );
     }
   },

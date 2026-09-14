@@ -212,13 +212,13 @@ export const createCliRuntimeAdapter = (
     isRunning = async (
       name: RuntimeName,
       signal?: AbortSignal
-    ): Promise<boolean> => {
+    ): Promise<{ running: true } | { reason: string; running: false }> => {
       try {
         await run(name, ["info"], signal);
-        return true;
-      } catch {
+        return { running: true };
+      } catch (error) {
         signal?.throwIfAborted();
-        return false;
+        return { reason: failureReason(error), running: false };
       }
     },
     /** Active docker context, e.g. `colima` or `desktop-linux`; empty when unknown. */
@@ -273,7 +273,7 @@ export const createCliRuntimeAdapter = (
       return {
         installed: true,
         name,
-        running: await isRunning(name, signal),
+        ...(await isRunning(name, signal)),
         version,
       };
     },
@@ -336,8 +336,27 @@ export const createCliRuntimeAdapter = (
         timeoutMs: LIFECYCLE_TIMEOUT_MS,
       });
     },
+    // Listed and removed by id rather than pruned: docker runs one prune at a time and refuses
+    // A second, so two Instances cleaning up together would fail.
     removeImages: async (name, label) => {
-      await run(name, ["image", "prune", "-af", "--filter", `label=${label}`]);
+      const { stdout } = await run(name, [
+          "image",
+          "ls",
+          "-q",
+          "--filter",
+          `label=${label}`,
+        ]),
+        ids = [
+          ...new Set(
+            stdout
+              .split("\n")
+              .map((line) => line.trim())
+              .filter((line) => line !== "")
+          ),
+        ];
+      if (ids.length > 0) {
+        await run(name, ["image", "rm", "-f", ...ids]);
+      }
     },
     runContainer: async (name, request) => {
       const { environment, image, labels, port, development } = request;

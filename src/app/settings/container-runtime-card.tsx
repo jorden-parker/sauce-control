@@ -41,7 +41,14 @@ const describe = ({ name, running, version }: InstalledRuntime): string =>
     <div className="flex flex-col gap-3">
       <p className="text-sm">Using {describe(runtime)}</p>
       {runtime.running ? null : (
-        <StartRuntimeForm action={startContainerRuntime} runtime={runtime} />
+        <>
+          {runtime.reason === undefined ? null : (
+            <p className="text-sm text-muted-foreground">
+              <code>{runtime.name} info</code> failed: {runtime.reason}
+            </p>
+          )}
+          <StartRuntimeForm action={startContainerRuntime} runtime={runtime} />
+        </>
       )}
     </div>
   ),
