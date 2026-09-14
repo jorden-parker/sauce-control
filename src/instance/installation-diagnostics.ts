@@ -3,6 +3,8 @@ const AUTH_HINT =
     "Check the repository's .npmrc or .yarnrc.yml authentication configuration and token access to its package registry. Supplying NODE_AUTH_TOKEN alone does not configure registry authentication.",
   LOCK_HINT =
     "Check that the branch's lockfile matches its package manifest and package-manager version.",
+  MODULE_HINT =
+    "A module could not be found. Check that the Dependency installation command installs everything the Development server command needs.",
   NETWORK_HINT =
     "Check network, DNS and proxy access from the Container Runtime to the package registry.",
   PERMISSION_HINT =
@@ -18,6 +20,8 @@ export const INSTALLATION_ERROR_HINTS: Record<string, string> = {
   E403: AUTH_HINT,
   E404: "Check the package registry configuration and package/version availability. Private registries may also return 404 when access is denied.",
   EACCES: PERMISSION_HINT,
+  EADDRINUSE:
+    "Something inside the container already uses the port. Open Compare → Configure repository and check Port against what the Development server command listens on.",
   EAI_AGAIN: NETWORK_HINT,
   EBADENGINE:
     "Check the repository's required Node.js and package-manager versions against the container.",
@@ -32,6 +36,7 @@ export const INSTALLATION_ERROR_HINTS: Record<string, string> = {
   ERESOLVE:
     "Resolve the dependency or peer-dependency conflict in the repository.",
   EROFS: PERMISSION_HINT,
+  ERR_MODULE_NOT_FOUND: MODULE_HINT,
   ERR_PNPM_FETCH_401: AUTH_HINT,
   ERR_PNPM_FETCH_403: AUTH_HINT,
   ERR_PNPM_FETCH_404:
@@ -42,6 +47,7 @@ export const INSTALLATION_ERROR_HINTS: Record<string, string> = {
   ERR_PNPM_UNSUPPORTED_ENGINE:
     "Check the repository's required Node.js and package-manager versions against the container.",
   ETIMEDOUT: NETWORK_HINT,
+  MODULE_NOT_FOUND: MODULE_HINT,
   SELF_SIGNED_CERT_IN_CHAIN: TLS_HINT,
   UNABLE_TO_GET_ISSUER_CERT_LOCALLY: TLS_HINT,
   UNABLE_TO_VERIFY_LEAF_SIGNATURE: TLS_HINT,
@@ -85,4 +91,33 @@ export function installationFailureMessage(result: string): string | undefined {
         : "No recognised error code was reported. Check the Dependency installation command and repository installation scripts."
       : `Installer reported ${code}. ${INSTALLATION_ERROR_HINTS[code!]}`;
   return `Dependency installation failed. ${exitMessage} ${tokenMessage} ${hint} Raw logs are suppressed to protect credentials.`;
+}
+
+/** Where the launcher records the development server's exit; only status and an allowlisted code. */
+export const DEVELOPMENT_EXIT_PATH = "/home/node/.sauce-control-exit";
+
+/** Validates the launcher's exit record; undefined for anything unrecognised. */
+export function developmentExitMessage(record: string): string | undefined {
+  const match = /^(\d{1,3}|signal):([A-Z0-9_]+|unknown)$/u.exec(record);
+  if (!match) {
+    return;
+  }
+  const [, status, code] = match;
+  if (code !== "unknown" && !Object.hasOwn(INSTALLATION_ERROR_HINTS, code!)) {
+    return;
+  }
+  if (/^\d/u.test(status!) && Number(status) > 255) {
+    return;
+  }
+  const exitMessage =
+      status === "signal"
+        ? "The development server was terminated by a signal. Check the Container Runtime's resource limits."
+        : `The development server exited with code ${Number(status)}.`,
+    hint =
+      code === "unknown"
+        ? status === "127"
+          ? "The shell could not find the command. Open Compare → Configure repository and check Development server command."
+          : "No recognised error code was printed."
+        : `It reported ${code}. ${INSTALLATION_ERROR_HINTS[code!]}`;
+  return `${exitMessage} ${hint}`;
 }

@@ -33,6 +33,7 @@ const INSTANCE_STEPS = [
   ["install", "Install dependencies"],
   ["start", "Start development server"],
   ["readiness", "Wait for readiness"],
+  ["response", "Wait for first response"],
 ] as const;
 
 /** Only controlled messages enter this in-memory record; snapshots are safe to send to the browser. */

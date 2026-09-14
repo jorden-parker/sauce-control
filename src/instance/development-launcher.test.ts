@@ -131,7 +131,8 @@ async function launchWithBridge(bindHost: string) {
     fakeProcess = Object.assign(new EventEmitter(), {
       exit: () => {},
       kill: process.kill.bind(process),
-    });
+    }),
+    written: [string, string][] = [];
   let child: ReturnType<typeof spawn> | undefined;
   runInNewContext(DEVELOPMENT_LAUNCHER, {
     Buffer,
@@ -139,7 +140,12 @@ async function launchWithBridge(bindHost: string) {
     process: fakeProcess,
     require: (name: string) => {
       if (name === "node:fs") {
-        return { chmodSync: () => {}, unlinkSync: () => {} };
+        return {
+          chmodSync: () => {},
+          unlinkSync: () => {},
+          writeFileSync: (path: string, text: string) =>
+            written.push([path, text]),
+        };
       }
       if (name === "node:net") {
         return {
@@ -198,6 +204,7 @@ async function launchWithBridge(bindHost: string) {
       fakeProcess.emit("SIGTERM");
       rmSync(root, { force: true, recursive: true });
     },
+    written,
   };
 }
 
@@ -238,6 +245,31 @@ describe("published port bridge", () => {
             { timeout: BRIDGE_TEST_TIMEOUT_MS }
           )
           .toBe(`bound to ${bindHost}`);
+      } finally {
+        launcher.stop();
+      }
+    },
+    BRIDGE_TEST_TIMEOUT_MS
+  );
+});
+
+describe("development server exit", () => {
+  it(
+    "records only the exit status and an allowlisted code, never the output",
+    async () => {
+      const launcher = await launchWithBridge("127.0.0.1");
+      try {
+        await expect(
+          launcher.send({
+            bridgePort: launcher.bridgePort,
+            environment: { SECRET: "hunter2" },
+            port: launcher.port,
+            startCommand: `${JSON.stringify(process.execPath)} -e "console.error('Error: listen EADDRINUSE: address already in use hunter2'); process.exit(7)"`,
+          })
+        ).resolves.toMatch(/started$/u);
+        await expect
+          .poll(() => launcher.written, { timeout: BRIDGE_TEST_TIMEOUT_MS })
+          .toEqual([["/home/node/.sauce-control-exit", "7:EADDRINUSE"]]);
       } finally {
         launcher.stop();
       }

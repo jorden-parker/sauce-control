@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { installationFailureMessage } from "./installation-diagnostics";
+import {
+  developmentExitMessage,
+  installationFailureMessage,
+} from "./installation-diagnostics";
 
 describe("safe installation diagnostics", () => {
   it("distinguishes registry rejection from a missing token", () => {
@@ -37,5 +40,29 @@ describe("safe installation diagnostics", () => {
     "installation-failed:E401:present:999999",
   ])("rejects arbitrary protocol data: %s", (input) => {
     expect(installationFailureMessage(input)).toBeUndefined();
+  });
+});
+
+describe("developmentExitMessage", () => {
+  it("names the status and hint for a recognised code", () => {
+    expect(developmentExitMessage("7:EADDRINUSE")).toMatch(
+      /^The development server exited with code 7\. It reported EADDRINUSE\. Something inside the container already uses the port\./u
+    );
+    expect(developmentExitMessage("127:unknown")).toMatch(
+      /could not find the command/u
+    );
+    expect(developmentExitMessage("signal:unknown")).toMatch(
+      /terminated by a signal/u
+    );
+  });
+  it("rejects anything outside the record grammar", () => {
+    for (const record of [
+      "1:rm -rf /",
+      "999:unknown",
+      "0:EADDRINUSE\nmore",
+      "EADDRINUSE",
+    ]) {
+      expect(developmentExitMessage(record)).toBeUndefined();
+    }
   });
 });

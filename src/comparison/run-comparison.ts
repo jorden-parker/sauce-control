@@ -17,9 +17,14 @@ import {
 
 export interface ComparisonRequest extends Omit<
   InstanceRequest,
-  "branch" | "onProgress" | "onFailure"
+  "branch" | "onProgress" | "onFailure" | "onDetail"
 > {
   onProgress?: (role: "base" | "target", step: InstanceStep) => void;
+  onDetail?: (
+    role: "base" | "target",
+    step: InstanceStep,
+    text: string
+  ) => void;
   onFailure?: (error: unknown, role: "base" | "target") => void;
   manualScenarios?: ManualScenario[];
   schemaSources?: SchemaSource[];
@@ -53,6 +58,7 @@ export const runComparison = async (
     schemaSources,
     manualScenarios,
     onProgress,
+    onDetail,
     onFailure,
     ...shared
   }: ComparisonRequest
@@ -73,8 +79,8 @@ export const runComparison = async (
     signal = shared.signal
       ? AbortSignal.any([shared.signal, controller.signal])
       : controller.signal;
-  let firstFailure: unknown,
-    failed = false;
+  let failed = false,
+    firstFailure: unknown;
   const failBranch = (error: unknown, role: "base" | "target") => {
       if (!failed && !shared.signal?.aborted) {
         failed = true;
@@ -88,6 +94,7 @@ export const runComparison = async (
         runInstance(dependencies, {
           ...shared,
           branch: role === "base" ? baseBranch : targetBranch,
+          onDetail: (step, text) => onDetail?.(role, step, text),
           onFailure: (error) => failBranch(error, role),
           onProgress: (step) => onProgress?.(role, step),
           signal,

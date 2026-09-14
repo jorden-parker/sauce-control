@@ -8,10 +8,13 @@ import type {
   RuntimeAdapter,
 } from "@/container-runtime/runtime-adapter";
 import type { CommandRunner } from "@/shell/command-runner";
+import type { HostProbe } from "@/instance/run-instance";
 import { runComparison } from "./run-comparison";
 
-/** In-memory docker whose containers only "start" once both branches asked, so a sequential runner would hang. */
-const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
+const answered: HostProbe = () =>
+    Promise.resolve({ outcome: "answered", status: 200 }),
+  /** In-memory docker whose containers only "start" once both branches asked, so a sequential runner would hang. */
+  fakeRuntime = ({ failing }: { failing?: string } = {}) => {
     const removed: string[] = [],
       runs: RunRequest[] = [];
     let nextPort = 40_000;
@@ -26,12 +29,14 @@ const fakeRuntime = ({ failing }: { failing?: string } = {}) => {
             running: true,
             version: "29.7.2",
           }),
+        exitRecord: () => Promise.resolve(),
         inspectContainers: () => Promise.resolve([]),
         isListening: (_name, containerId) =>
           containerId === failing
             ? Promise.resolve(false)
             : Promise.resolve(true),
         listContainers: () => Promise.resolve([]),
+        probeHttp: () => Promise.resolve({ outcome: "answered", status: 200 }),
         removeContainers: (_name, ids) => {
           removed.push(...ids);
           return Promise.resolve();
@@ -95,7 +100,7 @@ describe("running a Comparison", () => {
   it("brings up both Instances at once and serves each through the Proxy", async () => {
     const runtime = fakeRuntime(),
       comparison = await runComparison(
-        { git: fakeGit, runtime: runtime.adapter },
+        { git: fakeGit, probeHost: answered, runtime: runtime.adapter },
         request()
       );
     try {
@@ -121,7 +126,10 @@ describe("running a Comparison", () => {
   it("removes the Instance that did come up when the other fails", async () => {
     const runtime = fakeRuntime({ failing: "feature/login" });
     await expect(
-      runComparison({ git: fakeGit, runtime: runtime.adapter }, request())
+      runComparison(
+        { git: fakeGit, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
     ).rejects.toThrow("feature/login did not listen on port 3000");
     expect(runtime.removed.toSorted()).toEqual(["feature/login", "main"]);
   });
@@ -151,7 +159,7 @@ describe("running a Comparison", () => {
     });
     await expect(
       runComparison(
-        { git: fakeGit, runtime: runtime.adapter },
+        { git: fakeGit, probeHost: answered, runtime: runtime.adapter },
         { ...request(), onFailure }
       )
     ).rejects.toThrow("installation failed");

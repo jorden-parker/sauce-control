@@ -6,6 +6,7 @@ const net = require('node:net');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const socketPath = '/tmp/sauce-control.sock';
+const exitPath = '/home/node/.sauce-control-exit';
 let child, bridge, busy = false, launched = false;
 try { fs.unlinkSync(socketPath); } catch {}
 const base = { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/home/node', NODE_ENV: 'development' };
@@ -13,6 +14,24 @@ const errorCodes = ${JSON.stringify([...Object.keys(INSTALLATION_ERROR_HINTS).fi
 const execute = (command, environment, diagnose = false) => spawn('/bin/sh', ['-c', command], {
   cwd: '/app', env: environment, stdio: diagnose ? ['ignore', 'pipe', 'pipe'] : 'ignore', detached: true
 });
+// Drain both streams but retain at most 256 characters per stream.
+// Only allowlisted codes survive; raw chunks are never forwarded or saved.
+const watch = (child) => {
+  let errorIndex = errorCodes.length;
+  for (const stream of [child.stdout, child.stderr]) {
+    let tail = '';
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => {
+      const text = tail + chunk;
+      for (let index = 0; index < errorIndex; index++) {
+        if (new RegExp('\\b' + errorCodes[index] + '\\b').test(text)) { errorIndex = index; break; }
+      }
+      tail = text.slice(-256);
+    });
+    stream.on('end', () => { tail = ''; });
+  }
+  return () => errorCodes[errorIndex] || 'unknown';
+};
 const server = net.createServer({ allowHalfOpen: true }, socket => {
   let text = '';
   socket.setEncoding('utf8');
@@ -33,37 +52,29 @@ const server = net.createServer({ allowHalfOpen: true }, socket => {
         if (payload.environment.NODE_AUTH_TOKEN !== undefined) installEnv.NODE_AUTH_TOKEN = payload.environment.NODE_AUTH_TOKEN;
         const tokenStatus = installEnv.NODE_AUTH_TOKEN === undefined ? 'absent' : installEnv.NODE_AUTH_TOKEN.length ? 'present' : 'empty';
         child = execute(payload.installCommand, installEnv, true);
-        let errorIndex = errorCodes.length;
-        // Drain both streams but retain at most 256 characters per stream.
-        // Only allowlisted codes survive; raw chunks are never forwarded or saved.
-        for (const stream of [child.stdout, child.stderr]) {
-          let tail = '';
-          stream.setEncoding('utf8');
-          stream.on('data', chunk => {
-            const text = tail + chunk;
-            for (let index = 0; index < errorIndex; index++) {
-              if (new RegExp('\\b' + errorCodes[index] + '\\b').test(text)) { errorIndex = index; break; }
-            }
-            tail = text.slice(-256);
-          });
-          stream.on('end', () => { tail = ''; });
-        }
+        const errorCode = watch(child);
         const status = await new Promise(resolve => {
           child.once('error', () => resolve('spawn'));
           // close waits for stdout and stderr to drain, including the last error.
           child.once('close', (code, signal) => resolve(signal ? 'signal' : code));
         });
         delete installEnv.NODE_AUTH_TOKEN;
-        if (status !== 0) { busy = false; socket.end('installation-failed:' + (errorCodes[errorIndex] || 'unknown') + ':' + tokenStatus + ':' + status); return; }
+        if (status !== 0) { busy = false; socket.end('installation-failed:' + errorCode() + ':' + tokenStatus + ':' + status); return; }
       }
       socket.write('starting\n');
       delete payload.setupEnvironment;
       const environment = { ...base, ...payload.environment, NODE_ENV: 'development', PORT: String(payload.port) };
       delete environment.NODE_AUTH_TOKEN;
       delete payload.environment.NODE_AUTH_TOKEN;
-      child = execute(payload.startCommand, environment);
+      child = execute(payload.startCommand, environment, true);
+      const startErrorCode = watch(child);
       child.once('error', () => process.exit(1));
-      child.once('exit', () => process.exit(1));
+      // Only the exit status and an allowlisted code outlive the development server, in a
+      // file the host reads after the container stops. Raw output is never kept.
+      child.once('exit', (code, signal) => {
+        try { fs.writeFileSync(exitPath, (signal ? 'signal' : String(code)) + ':' + startErrorCode()); } catch {}
+        process.exit(1);
+      });
       // Development servers often bind only to localhost (Vite, say), which the published
       // port cannot reach. The bridge accepts on every interface and relays to that loopback.
       // Loopback is tried by address, since "localhost" resolves differently per runtime.

@@ -290,6 +290,54 @@ describe("CLI adapter containers", () => {
     ).resolves.toBe(false);
   });
 
+  it("reads the launcher's exit record out of the stopped container's tar stream", async () => {
+    const tar = `${".sauce-control-exit".padEnd(512, "\0")}7:EADDRINUSE\n${"\0".repeat(500)}`,
+      shell = fakeShell({
+        outputs: { "podman cp abc123:/home/node/.sauce-control-exit -": tar },
+      });
+    await expect(
+      createCliRuntimeAdapter(shell, mac).exitRecord("podman", "abc123")
+    ).resolves.toBe("7:EADDRINUSE");
+    await expect(
+      createCliRuntimeAdapter(fakeShell({ outputs: {} }), mac).exitRecord(
+        "podman",
+        "abc123"
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  it("probes GET / inside the container and reports what the development server did", async () => {
+    const probe = (stdout: string) => {
+      const shell = fakeShell({ outputs: {} }),
+        original = shell.run;
+      shell.run = (command, args, options) => {
+        original(command, args, options).catch(() => {});
+        return args[2] === "node"
+          ? Promise.resolve({ stdout })
+          : Promise.reject(new Error("not found"));
+      };
+      return createCliRuntimeAdapter(shell, mac).probeHttp(
+        "podman",
+        "abc123",
+        3000
+      );
+    };
+    await expect(probe("answered:200\n")).resolves.toEqual({
+      outcome: "answered",
+      status: 200,
+    });
+    await expect(probe("timeout\n")).resolves.toEqual({ outcome: "timeout" });
+    await expect(probe("refused\n")).resolves.toEqual({ outcome: "refused" });
+    await expect(probe("")).resolves.toEqual({ outcome: "unavailable" });
+    await expect(
+      createCliRuntimeAdapter(fakeShell({ outputs: {} }), mac).probeHttp(
+        "podman",
+        "abc123",
+        3000
+      )
+    ).resolves.toEqual({ outcome: "unavailable" });
+  });
+
   it("lists containers by label, running or not, and force-removes by id", async () => {
     const shell = fakeShell({
         outputs: {

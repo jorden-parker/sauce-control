@@ -138,9 +138,11 @@ const FIXTURE_ROOT = join(import.meta.dirname, "static-app"),
           running: true,
           version: "29.7.2",
         }),
+      exitRecord: () => Promise.resolve(),
       inspectContainers: () => Promise.resolve([]),
       isListening: () => Promise.resolve(true),
       listContainers: () => Promise.resolve([]),
+      probeHttp: () => Promise.resolve({ outcome: "answered", status: 200 }),
       removeContainers: async (_name, ids) => {
         await Promise.all(
           ids.map(

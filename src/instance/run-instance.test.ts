@@ -9,14 +9,24 @@ import type {
   RuntimeAdapter,
 } from "@/container-runtime/runtime-adapter";
 import type { CommandRunner } from "@/shell/command-runner";
-import { runInstance } from "./run-instance";
+import { type HostProbe, runInstance } from "./run-instance";
 
-/** In-memory docker: records builds and runs, answers readiness from `listening`. */
-const fakeRuntime = ({
+const answered: HostProbe = () =>
+    Promise.resolve({ outcome: "answered", status: 200 }),
+  hanging: HostProbe = () => Promise.resolve({ outcome: "timeout" }),
+  /** In-memory docker: records builds and runs, answers readiness from `listening`. */
+  fakeRuntime = ({
+    exited,
     listening = true,
     reason,
     running = true,
-  }: { listening?: boolean; reason?: string; running?: boolean } = {}) => {
+  }: {
+    /** The launcher's exit record; the container then reports as stopped. */
+    exited?: string;
+    listening?: boolean;
+    reason?: string;
+    running?: boolean;
+  } = {}) => {
     const builds: BuildRequest[] = [],
       removed: string[][] = [],
       runs: RunRequest[] = [],
@@ -33,9 +43,22 @@ const fakeRuntime = ({
             running,
             version: "29.7.2",
           }),
-        inspectContainers: () => Promise.resolve([]),
+        exitRecord: () => Promise.resolve(exited),
+        inspectContainers: (_name, ids) =>
+          Promise.resolve(
+            exited === undefined
+              ? []
+              : ids.map((containerId) => ({
+                  containerId,
+                  createdAt: "",
+                  hostPort: undefined,
+                  labels: {},
+                  state: "stopped" as const,
+                }))
+          ),
         isListening: () => Promise.resolve(listening),
         listContainers: () => Promise.resolve([]),
+        probeHttp: () => Promise.resolve({ outcome: "answered", status: 200 }),
         removeContainers: (_name, ids) => {
           removed.push(ids);
           return Promise.resolve();
@@ -101,7 +124,7 @@ describe("running one Instance", () => {
     const runtime = fakeRuntime(),
       git = fakeGit({ Dockerfile: "FROM scratch\n" }),
       instance = await runInstance(
-        { git, runtime: runtime.adapter },
+        { git, probeHost: answered, runtime: runtime.adapter },
         request()
       );
 
@@ -128,7 +151,10 @@ describe("running one Instance", () => {
     const runtime = fakeRuntime(),
       git = fakeGit({ "package.json": "{}" });
 
-    await runInstance({ git, runtime: runtime.adapter }, request());
+    await runInstance(
+      { git, probeHost: answered, runtime: runtime.adapter },
+      request()
+    );
 
     expect(runtime.builds[0]?.dockerfile).not.toContain("pnpm install");
     expect(runtime.builds[0]?.dockerfile).toContain(
@@ -141,7 +167,7 @@ describe("running one Instance", () => {
       git = fakeGit({ "package.json": "{}", "pnpm-lock.yaml": "" });
 
     await runInstance(
-      { git, runtime: runtime.adapter },
+      { git, probeHost: answered, runtime: runtime.adapter },
       {
         ...request(),
         environment: {
@@ -170,7 +196,7 @@ describe("running one Instance", () => {
       git = fakeGit({ "package.json": "{}" });
 
     await runInstance(
-      { git, runtime: runtime.adapter },
+      { git, probeHost: answered, runtime: runtime.adapter },
       { ...request(), environment: { NODE_AUTH_TOKEN: "synthetic-token" } }
     );
 
@@ -182,7 +208,10 @@ describe("running one Instance", () => {
     const runtime = fakeRuntime(),
       git = fakeGit({ Dockerfile: "FROM scratch\n" });
 
-    await runInstance({ git, runtime: runtime.adapter }, request());
+    await runInstance(
+      { git, probeHost: answered, runtime: runtime.adapter },
+      request()
+    );
 
     expect(runtime.runs).toEqual([
       {
@@ -210,7 +239,10 @@ describe("running one Instance when the Container Runtime is stopped", () => {
       git = fakeGit({});
 
     await expect(
-      runInstance({ git, runtime: runtime.adapter }, request())
+      runInstance(
+        { git, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
     ).rejects.toThrow(
       "docker is not running. Start it from Settings and try again."
     );
@@ -225,9 +257,87 @@ describe("running one Instance when the Container Runtime is stopped", () => {
       git = fakeGit({});
 
     await expect(
-      runInstance({ git, runtime: runtime.adapter }, request())
+      runInstance(
+        { git, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
     ).rejects.toThrow(
       "docker is not running (`docker info` failed: Command timed out after 10000ms.). Start it from Settings and try again."
+    );
+  });
+});
+
+describe("running one Instance that listens but never answers", () => {
+  it("names the hop that hangs while trying, then gives up and removes the container", async () => {
+    const runtime = fakeRuntime(),
+      git = fakeGit({ Dockerfile: "FROM scratch\n" }),
+      details: string[] = [];
+    runtime.adapter.probeHttp = () => Promise.resolve({ outcome: "timeout" });
+
+    await expect(
+      runInstance(
+        { git, probeHost: hanging, runtime: runtime.adapter },
+        {
+          ...request(),
+          onDetail: (step, text) => details.push(`${step}: ${text}`),
+          readiness: { pollIntervalMs: 1, timeoutMs: 30 },
+        }
+      )
+    ).rejects.toThrow(
+      /feature\/login listens on port 3000 but never responds\. GET \/ on 127\.0\.0\.1:49152 \(host\) accepted the connection but sent nothing for 15s; GET \/ on port 3000 inside the container accepted the connection but sent nothing for 15s\. The development server hangs .* Gave up after 30ms\./u
+    );
+    expect(details[0]).toMatch(
+      /^response: feature\/login listens on port 3000 but never responds\. .* Still trying\.$/u
+    );
+    expect(runtime.removed).toEqual([["abc123"]]);
+  });
+
+  it("blames the bridge when the application answers inside its container", async () => {
+    const runtime = fakeRuntime(),
+      git = fakeGit({ Dockerfile: "FROM scratch\n" });
+
+    await expect(
+      runInstance(
+        {
+          git,
+          probeHost: () => Promise.resolve({ outcome: "refused" }),
+          runtime: runtime.adapter,
+        },
+        { ...request(), readiness: { pollIntervalMs: 1, timeoutMs: 1 } }
+      )
+    ).rejects.toThrow(
+      "feature/login works inside its container but not through the published port 45173. GET / on 127.0.0.1:49152 (host) refused the connection; GET / on port 3000 inside the container answered HTTP 200. The bridge is not relaying"
+    );
+  });
+});
+
+describe("running one Instance whose development server exits", () => {
+  it("fails at once with the exit status, the hint, and where to see the output", async () => {
+    const runtime = fakeRuntime({ exited: "7:EADDRINUSE", listening: false }),
+      git = fakeGit({ Dockerfile: "FROM scratch\n" });
+
+    await expect(
+      runInstance(
+        { git, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
+    ).rejects.toThrow(
+      /^feature\/login: The development server exited with code 7\. It reported EADDRINUSE\. .* Its output is not kept, to protect credentials: run `pnpm run dev` in .*feature-login to see it\.$/u
+    );
+    expect(runtime.removed).toEqual([["abc123"]]);
+  });
+
+  it("does not trust an unrecognised record, and still says where to look", async () => {
+    const runtime = fakeRuntime({ exited: "1:rm -rf /", listening: false }),
+      git = fakeGit({ Dockerfile: "FROM scratch\n" });
+
+    await expect(
+      runInstance(
+        { git, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
+    ).rejects.toThrow(
+      /^feature\/login: The development server exited\. Its output is not kept/u
     );
   });
 });
@@ -238,7 +348,10 @@ describe("running one Instance that never listens", () => {
       git = fakeGit({ Dockerfile: "FROM scratch\n" });
 
     await expect(
-      runInstance({ git, runtime: runtime.adapter }, request())
+      runInstance(
+        { git, probeHost: answered, runtime: runtime.adapter },
+        request()
+      )
     ).rejects.toThrow("feature/login did not listen on port 3000 within 20ms");
     expect(runtime.removed).toEqual([["abc123"]]);
   });

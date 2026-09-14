@@ -351,6 +351,11 @@ export const startCurrentComparison = async (
                 },
                 {
                   ...request,
+                  onDetail: (role, step, text) => {
+                    if (!signal.aborted) {
+                      attempt.progress.detail(role, step, text);
+                    }
+                  },
                   onFailure: fail,
                   onProgress: (role, step) => {
                     if (!signal.aborted) {

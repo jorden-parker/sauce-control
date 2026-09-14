@@ -8,13 +8,18 @@ export const sitemapPaths = (xml: string): string[] =>
     }
   });
 
-/** Fetches and parses `sitemap.xml` under `origin`; empty when absent. */
+const SITEMAP_TIMEOUT_MS = 10_000;
+
+/** Fetches and parses `sitemap.xml` under `origin`; empty when absent or when the Instance never answers. */
 export const fetchSitemapPaths = async (
   origin: string,
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
-    const response = await fetch(new URL("/sitemap.xml", origin), { signal });
+    const timeout = AbortSignal.timeout(SITEMAP_TIMEOUT_MS),
+      response = await fetch(new URL("/sitemap.xml", origin), {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      });
     return response.ok ? sitemapPaths(await response.text()) : [];
   } catch {
     signal?.throwIfAborted();

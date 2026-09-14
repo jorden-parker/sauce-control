@@ -2,12 +2,16 @@ import { ComparisonStartError } from "@/comparison/comparison-start-error";
 import { type CommandRunner, nodeCommandRunner } from "@/shell/command-runner";
 import {
   type ContainerDetails,
+  type HttpProbe,
   type RunRequest,
   type RuntimeAdapter,
   bridgePortFor,
 } from "./runtime-adapter";
 import { DEVELOPMENT_TRANSPORT } from "@/instance/development-launcher";
-import { installationFailureMessage } from "@/instance/installation-diagnostics";
+import {
+  DEVELOPMENT_EXIT_PATH,
+  installationFailureMessage,
+} from "@/instance/installation-diagnostics";
 import { randomUUID } from "node:crypto";
 import type { RuntimeName, RuntimeStatus } from "./runtime-status";
 import { startPlan } from "./start-command";
@@ -53,6 +57,23 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10_000,
     "--tmpfs",
     "/tmp",
   ],
+  /** How long one in-container `GET /` may take before the development server counts as hung. */
+  PROBE_TIMEOUT_MS = 15_000,
+  /** Prints one line: `answered:<status>`, `refused`, or `timeout`. Tries both loopback addresses like the bridge does. */
+  HTTP_PROBE_SCRIPT = String.raw`
+const http = require('node:http');
+const port = Number(process.argv[1]);
+const attempt = (hosts) => {
+  const request = http.get({ host: hosts[0], port, path: '/', timeout: ${PROBE_TIMEOUT_MS}, headers: { host: 'localhost:' + port } }, response => {
+    console.log('answered:' + response.statusCode); response.resume(); process.exit(0);
+  });
+  request.on('timeout', () => { console.log('timeout'); process.exit(0); });
+  request.on('error', () => { if (hosts.length > 1) attempt(hosts.slice(1)); else { console.log('refused'); process.exit(0); } });
+};
+attempt(['127.0.0.1', '::1']);
+`,
+  /** `cp` streams a tar archive: one 512-byte header, then the file. */
+  TAR_HEADER_BYTES = 512,
   HEX_PORT = (port: number): string =>
     port.toString(16).toUpperCase().padStart(4, "0"),
   VERSION_PATTERN = /\d+\.\d+\.\d+/u,
@@ -310,6 +331,47 @@ export const createCliRuntimeAdapter = (
       } catch {
         signal?.throwIfAborted();
         return false;
+      }
+    },
+    exitRecord: async (name, containerId, signal) => {
+      try {
+        const { stdout } = await run(
+            name,
+            ["cp", `${containerId}:${DEVELOPMENT_EXIT_PATH}`, "-"],
+            signal
+          ),
+          record = stdout.slice(TAR_HEADER_BYTES).replaceAll("\0", "").trim();
+        return record === "" ? undefined : record;
+      } catch {
+        signal?.throwIfAborted();
+        return;
+      }
+    },
+    probeHttp: async (name, containerId, port, signal): Promise<HttpProbe> => {
+      try {
+        const { stdout } = await shell.run(
+            name,
+            [
+              "exec",
+              containerId,
+              "node",
+              "-e",
+              HTTP_PROBE_SCRIPT,
+              String(port),
+            ],
+            { signal, timeoutMs: PROBE_TIMEOUT_MS + commandTimeoutMs }
+          ),
+          line = stdout.trim(),
+          status = Number(/^answered:(\d+)$/u.exec(line)?.[1]);
+        if (Number.isInteger(status)) {
+          return { outcome: "answered", status };
+        }
+        return line === "refused" || line === "timeout"
+          ? { outcome: line }
+          : { outcome: "unavailable" };
+      } catch {
+        signal?.throwIfAborted();
+        return { outcome: "unavailable" };
       }
     },
     listContainers: async (name, label) => {

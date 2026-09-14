@@ -55,6 +55,15 @@ export interface ContainerDetails {
   state: "running" | "stopped";
 }
 
+/**
+ * What one HTTP request to the application port reported: `answered` carries the status,
+ * `refused` means nothing accepted the connection, `timeout` means it accepted but never replied,
+ * and `unavailable` means the probe itself could not run.
+ */
+export type HttpProbe =
+  | { outcome: "answered"; status: number }
+  | { outcome: "refused" | "timeout" | "unavailable" };
+
 export interface RunningContainer {
   containerId: string;
   /** Loopback host port published to the container port. */
@@ -74,6 +83,22 @@ export interface RuntimeAdapter {
     port: number,
     signal?: AbortSignal
   ) => Promise<boolean>;
+  /** Sends `GET /` to `port` on the container's own loopback and reports what came back. */
+  probeHttp: (
+    name: RuntimeName,
+    containerId: string,
+    port: number,
+    signal?: AbortSignal
+  ) => Promise<HttpProbe>;
+  /**
+   * The launcher's exit record once the development server has exited and the container
+   * stopped: `<status>:<code>`, unvalidated. Undefined while it runs or when nothing was recorded.
+   */
+  exitRecord: (
+    name: RuntimeName,
+    containerId: string,
+    signal?: AbortSignal
+  ) => Promise<string | undefined>;
   /** Details of the containers; missing ids are skipped. */
   inspectContainers: (
     name: RuntimeName,
